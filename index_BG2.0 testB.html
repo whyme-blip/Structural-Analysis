@@ -388,940 +388,538 @@ ST02,30.114,78.246,L2,315,16,2,A,Quartzite,</textarea>
         </div>
     </div>
 
-    <script>
-      // ==========================================
-// BG2.2 ARCHITECTURE ENGINE & PHASE REGISTRY
+<script>
 // ==========================================
-class StructuralPhase {
-    constructor(id, commonName, description = "") {
-        this.id = id;
-        this.name = commonName;
-        this.description = description;
-        this.planarElements = []; // { strike, dip, meta }
-        this.linearElements = []; // { trend, plunge, meta }
-        this.eigenvalues = null;   // Computational slot
-        this.eigenvectors = null;  // Computational slot
-    }
-}
+// 1. MASTER STRUCTURAL DATABASE LAYER
+// ==========================================
+let structuralDB = {
+    planar: { S0: [], S1: [], S2: [], S3: [] },
+    linear: { L1: [], L2: [], L3: [] },
+    foldAxis: { FA1: [], FA2: [], FA3: [] },
+    domains: {}, // Schema: { "DomainName": { planar: {...}, linear: {...}, foldAxis: {...} } }
+    stations: {}
+};
 
-const Survey = {
-    phases: new Map(),
-    metadata: { totalRecords: 0, failures: 0 },
-    
-    getOrCreatePhase(id, fallbackName = "") {
-        let cleanId = id ? id.trim() : "Unclassified";
-        if (!this.phases.has(cleanId)) {
-            this.phases.set(cleanId, new StructuralPhase(cleanId, fallbackName || `Phase ${cleanId}`));
-        }
-        return this.phases.get(cleanId);
+// Global Results Storage Object
+let analysisResults = {
+    global: {},
+    domains: {}
+};
+
+let runtimeSummary = { stations: 0, measurements: 0, domains: [], lithologies: [], hasYounging: false };
+
+const symbolsConfig = {
+    'S0': { char: '●', color: '#2563eb', label: 'Bedding S0' }, 'S1': { char: '▲', color: '#16a34a', label: 'Foliation S1' },
+    'S2': { char: '■', color: '#a855f7', label: 'Cleavage S2' }, 'S3': { char: '◆', color: '#f97316', label: 'Fabric S3' },
+    'L1': { char: '✚', color: '#dc2626', label: 'Lineation L1' }, 'L2': { char: '✖', color: '#854d0e', label: 'Lineation L2' },
+    'L3': { char: '★', color: '#d946ef', label: 'Lineation L3' }, 'FA1': { char: '⊗', color: '#0f172a', label: 'Axis FA1' },
+    'FA2': { char: '⊗', color: '#334155', label: 'Axis FA2' }, 'FA3': { char: '⊗', color: '#475569', label: 'Axis FA3' }
+};
+
+const InputLayer = {
+    normalizeStructureName(raw) {
+        if (!raw) return 'S0'; const c = raw.toUpperCase().replace(/[\s_\-]/g, '');
+        if (['FOLDAXIS', 'FOLDAXIS1', 'FA1', 'FA'].includes(c)) return 'FA1';
+        if (['FOLDAXIS2', 'FA2'].includes(c)) return 'FA2';
+        if (['FOLDAXIS3', 'FA3'].includes(c)) return 'FA3';
+        return c;
     },
-    
-    clear() {
-        this.phases.clear();
-        this.metadata.totalRecords = 0;
-        this.metadata.failures = 0;
+
+    initializeDB() {
+        structuralDB = {
+            planar: { S0: [], S1: [], S2: [], S3: [] },
+            linear: { L1: [], L2: [], L3: [] },
+            foldAxis: { FA1: [], FA2: [], FA3: [] },
+            domains: {}, stations: {}
+        };
+        analysisResults = { global: {}, domains: {} };
+        runtimeSummary = { stations: 0, measurements: 0, domains: [], lithologies: [], hasYounging: false };
+    },
+
+    initDomainSubstructures(domName) {
+        if (!structuralDB.domains[domName]) {
+            structuralDB.domains[domName] = {
+                planar: { S0: [], S1: [], S2: [], S3: [] },
+                linear: { L1: [], L2: [], L3: [] },
+                foldAxis: { FA1: [], FA2: [], FA3: [] }
+            };
+        }
+    },
+
+    parseCSV(text) {
+        this.initializeDB();
+        const lines = text.trim().split('\n');
+        if (lines.length < 2) return { logs: [{msg: "Empty dataset submitted.", type:"warn"}] };
+        
+        const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+        let stSet = new Set(), domSet = new Set(), lithSet = new Set();
+
+        for (let i = 1; i < lines.length; i++) {
+            if (!lines[i].trim()) continue;
+            const cols = lines[i].split(',').map(c => c.trim()); let row = {};
+            headers.forEach((h, idx) => { row[h] = cols[idx]; });
+            
+            let lat = parseFloat(row.latitude), lon = parseFloat(row.longitude);
+            let strVal = parseFloat(row.strike || row.trend), dipVal = parseFloat(row.dip || row.plunge);
+            if (isNaN(lat) || isNaN(lon) || isNaN(strVal) || isNaN(dipVal)) continue;
+
+            let sType = this.normalizeStructureName(row.structure);
+            let stId = row.station || `ST${i}`, dId = row.domain || 'Global', lth = row.lithology || 'Unknown';
+            
+            stSet.add(stId); domSet.add(dId);
+            if (row.lithology && row.lithology !== 'Unknown') lithSet.add(lth);
+            if (row.younging && row.younging.trim() !== '') runtimeSummary.hasYounging = true;
+
+            let gen = row.generation ? parseInt(row.generation) : null;
+            if (!gen) gen = ['S0','S1','L1','FA1'].includes(sType) ? 1 : (['S2','L2','FA2'].includes(sType) ? 2 : 3);
+            
+            let record = { station: stId, lat, lon, domain: dId, lithology: lth, struct: sType, strike: strVal, dip: dipVal, generation: gen };
+            this.initDomainSubstructures(dId);
+
+            // Compute structural directional components
+            if (['S0', 'S1', 'S2', 'S3'].includes(sType)) {
+                let rS = ((strVal + 90) % 360) * Math.PI / 180, rD = dipVal * Math.PI / 180;
+                record.vector = [Math.sin(rD) * Math.sin(rS), Math.sin(rD) * Math.cos(rS), Math.cos(rD)];
+                if (record.vector[2] < 0) record.vector = record.vector.map(x => -x);
+                
+                structuralDB.planar[sType].push(record);
+                structuralDB.domains[dId].planar[sType].push(record);
+            } else if (['L1', 'L2', 'L3'].includes(sType)) {
+                let rT = strVal * Math.PI / 180, rP = dipVal * Math.PI / 180;
+                record.vector = [Math.cos(rP) * Math.sin(rT), Math.cos(rP) * Math.cos(rT), Math.sin(rP)];
+                if (record.vector[2] < 0) record.vector = record.vector.map(x => -x);
+                
+                structuralDB.linear[sType].push(record);
+                structuralDB.domains[dId].linear[sType].push(record);
+            } else if (['FA1', 'FA2', 'FA3'].includes(sType)) {
+                let rT = strVal * Math.PI / 180, rP = dipVal * Math.PI / 180;
+                record.vector = [Math.cos(rP) * Math.sin(rT), Math.cos(rP) * Math.cos(rT), Math.sin(rP)];
+                if (record.vector[2] < 0) record.vector = record.vector.map(x => -x);
+                
+                structuralDB.foldAxis[sType].push(record);
+                structuralDB.domains[dId].foldAxis[sType].push(record);
+            }
+            structuralDB.stations[stId] = true;
+        }
+
+        let totalRecords = 0;
+        ['S0','S1','S2','S3'].forEach(k => totalRecords += structuralDB.planar[k].length);
+        ['L1','L2','L3'].forEach(k => totalRecords += structuralDB.linear[k].length);
+        ['FA1','FA2','FA3'].forEach(k => totalRecords += structuralDB.foldAxis[k].length);
+
+        runtimeSummary.stations = stSet.size;
+        runtimeSummary.measurements = totalRecords;
+        runtimeSummary.domains = [...domSet];
+        runtimeSummary.lithologies = lithSet.size > 0 ? [...lithSet] : ["Quartzite", "Schist"];
+
+        return { logs: [{ msg: `Router initialized. Parsed ${totalRecords} items into secure memory.`, type:"pass" }] };
     }
 };
 
-        // Legacy structural compatibility arrays for fallback support
-        let planarData = [];
-        let linearData = [];
-        let foldAxesByGeneration = {};
+// ==========================================
+// 3. COMPLETE MATHEMATICAL TENSOR ENGINE
+// ==========================================
+const MathEngine = {
+    buildOrientationTensor(subset) {
+        let T = [[0,0,0], [0,0,0], [0,0,0]]; if (subset.length === 0) return T;
+        subset.forEach(p => {
+            let v = p.vector;
+            for(let i=0; i<3; i++) { for(let j=0; j<3; j++) T[i][j] += v[i] * v[j]; }
+        });
+        for(let i=0; i<3; i++) { for(let j=0; j<3; j++) T[i][j] /= subset.length; }
+        return T;
+    },
 
-        let runtimeSummary = {
-            stations: 0, measurements: 0,
-            s0: 0, s1: 0, s2: 0, s3: 0,
-            l1: 0, l2: 0, l3: 0, foldaxis: 0,
-            domains: [], lithologies: [],
-            hasYounging: false
-        };
-
-        const symbolsConfig = {
-            'S0': { char: '●', color: '#2563eb', label: 'Bedding S0' },
-            'S1': { char: '▲', color: '#16a34a', label: 'Foliation S1' },
-            'S2': { char: '■', color: '#a855f7', label: 'Cleavage S2' },
-            'S3': { char: '◆', color: '#f97316', label: 'Fabric S3' },
-            'L1': { char: '✚', color: '#dc2626', label: 'Lineation L1' },
-            'L2': { char: '✖', color: '#854d0e', label: 'Lineation L2' },
-            'L3': { char: '★', color: '#d946ef', label: 'Lineation L3' },
-            'FOLDAXIS': { char: '⊗', color: '#0f172a', label: 'Measured Axis' }
-        };
-
-        const InputLayer = {
-            parseCSV(text) {
-                const lines = text.trim().split('\n');
-                if (lines.length < 2) return { logs: [{msg: "Empty configuration dataset submitted.", type:"warn"}] };
-                
-                const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-                const logs = [];
-
-                planarData = []; linearData = []; foldAxesByGeneration = {};
-                let uniqueStations = new Set(); let uniqueDomains = new Set(); let uniqueLithologies = new Set();
-                let foundYounging = false;
-
-                for (let i = 1; i < lines.length; i++) {
-                    if (!lines[i].trim()) continue;
-                    const cols = lines[i].split(',').map(c => c.trim());
-                    let row = {};
-                    headers.forEach((h, idx) => { row[h] = cols[idx]; });
-
-                    let lat = parseFloat(row.latitude); let lon = parseFloat(row.longitude);
-                    let strikeVal = parseFloat(row.strike || row.trend); let dipVal = parseFloat(row.dip || row.plunge);
-
-                    if (isNaN(lat) || isNaN(lon) || isNaN(strikeVal) || isNaN(dipVal)) {
-                        continue;
-                    }
-
-                    let structType = (row.structure || 'S0').toUpperCase().replace(/\s+/g, '');
-                    let stId = row.station || `ST${i}`;
-                    let domId = row.domain || 'Global';
-                    let lith = row.lithology || 'Unknown';
-                    let genId = row.generation ? parseInt(row.generation) : null;
-
-                    uniqueStations.add(stId);
-                    uniqueDomains.add(domId);
-                    if(row.lithology && row.lithology !== 'Unknown') uniqueLithologies.add(lith);
-                    if(row.younging && row.younging.trim() !== '') foundYounging = true;
-
-                    if (!genId) {
-                        if (['L1', 'S1'].includes(structType)) genId = 1;
-                        else if (['L2', 'S2'].includes(structType)) genId = 2;
-                        else if (['L3', 'S3'].includes(structType)) genId = 3;
-                    }
-
-                    let entry = { station: stId, lat, lon, domain: domId, lithology: lith, struct: structType, strike: strikeVal, dip: dipVal, generation: genId };
-
-                    if (['S0', 'S1', 'S2', 'S3'].includes(structType)) {
-                        let ddRad = ((strikeVal + 90) % 360) * Math.PI / 180;
-                        let dipRad = dipVal * Math.PI / 180;
-                        entry.vector = [Math.sin(dipRad) * Math.sin(ddRad), Math.sin(dipRad) * Math.cos(ddRad), Math.cos(dipRad)];
-                        if (entry.vector[2] < 0) entry.vector = entry.vector.map(x => -x);
-                        planarData.push(entry);
-                    } else if (['L1', 'L2', 'L3', 'FOLDAXIS'].includes(structType)) {
-                        let trRad = strikeVal * Math.PI / 180;
-                        let plRad = dipVal * Math.PI / 180;
-                        entry.vector = [Math.cos(plRad) * Math.sin(trRad), Math.cos(plRad) * Math.cos(trRad), Math.sin(plRad)];
-                        if (entry.vector[2] < 0) entry.vector = entry.vector.map(x => -x);
-                        
-                        if(structType === 'FOLDAXIS') {
-                            let g = genId || 1;
-                            if(!foldAxesByGeneration[g]) foldAxesByGeneration[g] = [];
-                            foldAxesByGeneration[g].push(entry);
-                        } else {
-                            linearData.push(entry);
-                        }
-                    }
-                }
-
-                let totalFoldAxesCount = Object.values(foldAxesByGeneration).reduce((acc, curr) => acc + curr.length, 0);
-
-                runtimeSummary.stations = uniqueStations.size;
-                runtimeSummary.measurements = planarData.length + linearData.length + totalFoldAxesCount;
-                runtimeSummary.domains = [...uniqueDomains];
-                runtimeSummary.lithologies = uniqueLithologies.size > 0 ? [...uniqueLithologies] : ["Quartzite", "Schist"];
-                runtimeSummary.s0 = planarData.filter(p => p.struct === 'S0').length;
-                runtimeSummary.s1 = planarData.filter(p => p.struct === 'S1').length;
-                runtimeSummary.s2 = planarData.filter(p => p.struct === 'S2').length;
-                runtimeSummary.s3 = planarData.filter(p => p.struct === 'S3').length;
-                runtimeSummary.l1 = linearData.filter(p => ['L1','L1LINEATION'].includes(p.struct) || p.generation === 1).length;
-                runtimeSummary.l2 = linearData.filter(p => ['L2','L2LINEATION'].includes(p.struct) || p.generation === 2).length;
-                runtimeSummary.l3 = linearData.filter(p => ['L3','L3LINEATION'].includes(p.struct) || p.generation === 3).length;
-                runtimeSummary.foldaxis = totalFoldAxesCount;
-                runtimeSummary.hasYounging = foundYounging;
-
-                logs.push({ msg: `Successfully registered ${runtimeSummary.measurements} individual geometries. Quality metrics stable.`, type:"pass" });
-                return { logs };
-            }
-        };
-
-        const MathEngine = {
-            buildOrientationTensor(subset) {
-                let T = [[0,0,0], [0,0,0], [0,0,0]];
-                subset.forEach(p => {
-                    let v = p.vector;
-                    for(let i=0; i<3; i++) {
-                        for(let j=0; j<3; j++) { T[i][j] += v[i] * v[j]; }
-                    }
-                });
-                for(let i=0; i<3; i++) { for(let j=0; j<3; j++) { T[i][j] /= subset.length; } }
-                return T;
-            },
-
-            solveEigenstructures(T) {
-                let m = (T[0][0] + T[1][1] + T[2][2]) / 3;
-                let a00 = T[0][0]-m, a11 = T[1][1]-m, a22 = T[2][2]-m;
-                let a01 = T[0][1], a02 = T[0][2], a12 = T[1][2];
-                
-                let q = (a00*a11*a22 + 2*a01*a02*a12 - a02*a02*a11 - a01*a01*a22 - a12*a12*a00) / 2;
-                let p = (a00*a00 + a11*a11 + a22*a22 + 2*(a01*a01 + a02*a02 + a12*a12)) / 6;
-
-                let vals = [m, m, m];
-                if (p > 1e-8) {
-                    let phi = Math.acos(Math.max(-1, Math.min(1, q / Math.pow(p, 1.5)))) / 3;
-                    vals[0] = m + 2 * Math.sqrt(p) * Math.cos(phi);
-                    vals[1] = m + 2 * Math.sqrt(p) * Math.cos(phi + (2*Math.PI/3));
-                    vals[2] = m + 2 * Math.sqrt(p) * Math.cos(phi + (4*Math.PI/3));
-                }
-                vals.sort((x, y) => y - x);
-
-                let vectors = [];
-                for (let k = 0; k < 3; k++) {
-                    let l = vals[k];
-                    let r0 = [T[0][0]-l, T[0][1], T[0][2]];
-                    let r1 = [T[1][0], T[1][1]-l, T[1][2]];
-                    let cp = [
-                        r0[1]*r1[2] - r0[2]*r1[1],
-                        r0[2]*r1[0] - r0[0]*r1[2],
-                        r0[0]*r1[1] - r0[1]*r1[0]
-                    ];
-                    let len = Math.sqrt(cp[0]*cp[0] + cp[1]*cp[1] + cp[2]*cp[2]);
-                    if(len < 1e-4) cp = [0,0,1]; else cp = cp.map(x => x/len);
-                    vectors.push(cp);
-                }
-                
-                let K = Math.log(vals[0]/vals[1]) / Math.log(vals[1]/Math.max(vals[2], 1e-5));
-                let C = Math.log(vals[0]/Math.max(vals[2], 1e-5));
-
-                return { values: vals, vectors, K, C };
-            },
-
-            calculateFisherMean(subset) {
-                if(subset.length === 0) return { trend:0, plunge:0 };
-                let R = [0,0,0];
-                subset.forEach(p => { for(let i=0; i<3; i++) R[i] += p.vector[i]; });
-                let rLen = Math.sqrt(R[0]*R[0] + R[1]*R[1] + R[2]*R[2]);
-                let meanVector = R.map(x => x / rLen);
-                return this.vectorToTrendPlunge(meanVector);
-            },
-
-            calculateBetaAxis(poles) {
-                if(poles.length < 2) return { trend: 0, plunge: 0 };
-                let T = this.buildOrientationTensor(poles);
-                let eigen = this.solveEigenstructures(T);
-                return this.vectorToTrendPlunge(eigen.vectors[2]);
-            },
-
-            getPlungeCharacter(plunge) {
-                if(plunge < 10) return "Nearly Horizontal";
-                if(plunge < 30) return "Gently Plunging";
-                if(plunge < 60) return "Moderately Plunging";
-                if(plunge < 80) return "Steeply Plunging";
-                return "Nearly Vertical";
-            },
-
-            getAngle(v1, v2) {
-                let dot = v1[0]*v2[0] + v1[1]*v2[1] + v1[2]*v2[2];
-                return Math.acos(Math.max(-1, Math.min(1, Math.abs(dot)))) * 180 / Math.PI;
-            },
-
-            trendPlungeToVector(trend, plunge) {
-                let trRad = trend * Math.PI / 180;
-                let plRad = plunge * Math.PI / 180;
-                return [Math.cos(plRad) * Math.sin(trRad), Math.cos(plRad) * Math.cos(trRad), Math.sin(plRad)];
-            },
-
-            vectorToTrendPlunge(v) {
-                let sign = v[2] < 0 ? -1 : 1;
-                let x = v[0] * sign, y = v[1] * sign, z = v[2] * sign;
-                let plunge = Math.asin(Math.max(-1, Math.min(1, z))) * 180 / Math.PI;
-                let trend = Math.atan2(x, y) * 180 / Math.PI;
-                if (trend < 0) trend += 360;
-                return { trend, plunge };
-            },
-
-            formatTrendPlunge(tp) {
-                let t = Math.round(tp.trend).toString().padStart(3, '0');
-                let p = Math.round(tp.plunge).toString().padStart(2, '0');
-                return `${t}/${p}`;
-            },
-
-            // Functional Metrics Engines Replacing All Hardcoded Numbers
-            calculateConfidence(coverageWeight, tensorWeight, bootstrapWeight, spatialWeight, foldAgreementWeight, lineationAgreementWeight) {
-                let score = coverageWeight + tensorWeight + bootstrapWeight + spatialWeight + foldAgreementWeight + lineationAgreementWeight;
-                if (score > 95 && runtimeSummary.stations < 10) {
-                    score = 80; 
-                }
-                return score;
-            },
-
-            calculateCylindricity(eigenValues) {
-                if (!eigenValues || eigenValues.length < 2) return 0;
-                return Math.round((eigenValues[0] - eigenValues[1]) * 100);
-            },
-
-            calculateRMS(beta, poles) {
-                if(!beta || poles.length === 0) return 0.0;
-                let bVec = this.trendPlungeToVector(beta.trend, beta.plunge);
-                let sumSq = 0;
-                poles.forEach(p => {
-                    let dot = p.vector[0]*bVec[0] + p.vector[1]*bVec[1] + p.vector[2]*bVec[2];
-                    let dev = Math.abs(Math.acos(Math.max(-1, Math.min(1, dot))) * 180 / Math.PI - 90);
-                    sumSq += dev * dev;
-                });
-                return Math.sqrt(sumSq / poles.length);
-            },
-
-            calculateBootstrapPrecision(rms) {
-                return rms * 1.5; 
-            },
-
-            evaluateSuitability(cylindricity) {
-                return cylindricity > 50 ? "Highly Suitable" : "Unsuitable / Structural Incoherency";
-            },
-
-            getMisfitStatus(misfit) {
-                if (misfit <= 2.0) return "Excellent";
-                if (misfit <= 7.0) return "Good";
-                if (misfit <= 15.0) return "Moderate";
-                return "Poor";
-            }
-        };
-
-        function calculateGeoStatistics(subset) {
-            if (subset.length === 0) return "";
-            let dips = subset.map(p => p.dip);
-            
-            let avgDip = dips.reduce((a,b)=>a+b, 0) / dips.length;
-            let maxDip = Math.max(...dips);
-            let minDip = Math.min(...dips);
-            
-            let meanDip = dips.reduce((acc, val) => acc + val, 0) / dips.length;
-            let variance = dips.reduce((acc, val) => acc + Math.pow(val - meanDip, 2), 0) / dips.length;
-            let strikeVar = Math.sqrt(variance);
-            let meanPole = MathEngine.calculateFisherMean(subset);
-
-            return `
-                <table>
-                    <tr><th>Average Bedding Dip</th><td>${avgDip.toFixed(0)}°</td></tr>
-                    <tr><th>Maximum Dip / Minimum Dip</th><td>Max: ${maxDip}° / Min: ${minDip}°</td></tr>
-                    <tr><th>Strike Variability (Standard Dev)</th><td>${strikeVar.toFixed(1)}°</td></tr>
-                    <tr><th>Mean Bedding Pole orientation</th><td>Trend ${meanPole.trend.toFixed(0)}° / Plunge ${meanPole.plunge.toFixed(0)}°</td></tr>
-                </table>
-            `;
+    solveEigenstructures(T) {
+        let m = (T[0][0] + T[1][1] + T[2][2]) / 3;
+        let a00 = T[0][0]-m, a11 = T[1][1]-m, a22 = T[2][2]-m, a01 = T[0][1], a02 = T[0][2], a12 = T[1][2];
+        let q = (a00*a11*a22 + 2*a01*a02*a12 - a02*a02*a11 - a01*a01*a22 - a12*a12*a00) / 2;
+        let p = (a00*a00 + a11*a11 + a22*a22 + 2*(a01*a01 + a02*a02 + a12*a12)) / 6;
+        let vals = [m, m, m];
+        if (p > 1e-8) {
+            let phi = Math.acos(Math.max(-1, Math.min(1, q / Math.pow(p, 1.5)))) / 3;
+            vals[0] = m + 2 * Math.sqrt(p) * Math.cos(phi);
+            vals[1] = m + 2 * Math.sqrt(p) * Math.cos(phi + (2*Math.PI/3));
+            vals[2] = m + 2 * Math.sqrt(p) * Math.cos(phi + (4*Math.PI/3));
         }
-
-        const VisualizationEngine = {
-            render() {
-                const canvas = document.getElementById('stereoCanvas');
-                const ctx = canvas.getContext('2d');
-                ctx.clearRect(0,0,300,300);
-                const cx = 150, cy = 150, r = 110;
-
-                ctx.strokeStyle = '#cbd5e1';
-                ctx.lineWidth = 1;
-                ctx.beginPath(); ctx.arc(cx, cy, r, 0, 2*Math.PI); ctx.stroke();
-                ctx.beginPath(); ctx.moveTo(cx, cy-r); ctx.lineTo(cx, cy+r); ctx.stroke();
-                ctx.beginPath(); ctx.moveTo(cx-r, cy); ctx.lineTo(cx+r, cy); ctx.stroke();
-
-                let allItems = [...planarData, ...linearData];
-                Object.values(foldAxesByGeneration).forEach(arr => { allItems = allItems.concat(arr); });
-
-                allItems.forEach(p => {
-                    let [nx, ny, nz] = p.vector;
-                    let factor = Math.sqrt(1 / (1 + Math.abs(nz)));
-                    let px = cx + r * nx * factor;
-                    let py = cy - r * ny * factor;
-                    
-                    let cfg = symbolsConfig[p.struct] || { char: '●', color: '#0f172a' };
-                    ctx.fillStyle = cfg.color;
-                    ctx.font = "bold 12px monospace";
-                    ctx.textAlign = "center";
-                    ctx.textBaseline = "middle";
-                    ctx.fillText(cfg.char, px, py);
-                });
-
-                ctx.fillStyle = "rgba(255,255,255,0.9)";
-                ctx.fillRect(5, 215, 95, 80);
-                ctx.strokeStyle = "#cbd5e1";
-                ctx.strokeRect(5, 215, 95, 80);
-                ctx.font = "9px system-ui";
-                ctx.textAlign = "left";
-                let lIdx = 0;
-                for (let k in symbolsConfig) {
-                    if (lIdx < 5) {
-                        ctx.fillStyle = symbolsConfig[k].color;
-                        ctx.fillText(`${symbolsConfig[k].char} ${k}`, 10, 225 + (lIdx * 11));
-                        lIdx++;
-                    }
-                }
-
-                const mCanvas = document.getElementById('mapCanvas');
-                const mCtx = mCanvas.getContext('2d');
-                mCtx.clearRect(0,0,300,300);
-
-                mCtx.strokeStyle = '#f1f5f9';
-                for(let g=20; g<300; g+=25) {
-                    mCtx.beginPath(); mCtx.moveTo(g, 0); mCtx.lineTo(g, 300); mCtx.stroke();
-                    mCtx.beginPath(); mCtx.moveTo(0, g); mCtx.lineTo(300, g); mCtx.stroke();
-                }
-
-                if (allItems.length === 0) return;
-
-                let lats = allItems.map(p => p.lat); let lons = allItems.map(p => p.lon);
-                let minLat = Math.min(...lats), maxLat = Math.max(...lats);
-                let minLon = Math.min(...lons), maxLon = Math.max(...lons);
-
-                let printedStations = new Set();
-                let points = [];
-                allItems.forEach(p => {
-                    let x = 40 + ((p.lon - minLon) / (maxLon - minLon || 1)) * 220;
-                    let y = 260 - ((p.lat - minLat) / (maxLat - minLat || 1)) * 220;
-                    points.push([x, y]);
-
-                    if (printedStations.has(p.station + p.struct)) return;
-                    printedStations.add(p.station + p.struct);
-                    
-                    let cfg = symbolsConfig[p.struct] || { color: '#0f172a' };
-                    mCtx.fillStyle = cfg.color;
-                    mCtx.beginPath(); mCtx.arc(x, y, 4, 0, 2*Math.PI); mCtx.fill();
-                    
-                    mCtx.font = '9px monospace';
-                    mCtx.fillStyle = '#475569';
-                    mCtx.fillText(p.station, x + 6, y + 3);
-                });
-
-                if (points.length >= 3) {
-                    mCtx.strokeStyle = "rgba(37, 99, 235, 0.2)";
-                    mCtx.lineWidth = 1.5;
-                    mCtx.beginPath();
-                    mCtx.moveTo(points[0][0], points[0][1]);
-                    for(let h=1; h<points.length; h++) mCtx.lineTo(points[h][0], points[h][1]);
-                    mCtx.closePath();
-                    mCtx.stroke();
-                }
-
-                mCtx.strokeStyle = "#0f172a";
-                mCtx.lineWidth = 2;
-                mCtx.beginPath(); mCtx.moveTo(20, 280); mCtx.lineTo(70, 280); mCtx.stroke();
-                mCtx.font = "8px system-ui"; mCtx.fillStyle = "#0f172a";
-                mCtx.fillText("0", 18, 290); mCtx.fillText("500 m", 62, 290);
-            }
-        };
-
-        function displayDatasetCounts() {
-            document.getElementById('inv-stations').innerText = runtimeSummary.stations;
-            document.getElementById('inv-total').innerText = runtimeSummary.measurements;
-            document.getElementById('inv-domains').innerText = runtimeSummary.domains.length;
-            document.getElementById('inv-litho').innerText = runtimeSummary.lithologies.length;
-
-            document.getElementById('inv-s0').innerText = runtimeSummary.s0;
-            document.getElementById('inv-s1').innerText = runtimeSummary.s1;
-            document.getElementById('inv-s2').innerText = runtimeSummary.s2;
-            document.getElementById('inv-s3').innerText = runtimeSummary.s3;
-
-            document.getElementById('inv-l1').innerText = runtimeSummary.l1;
-            document.getElementById('inv-l2').innerText = runtimeSummary.l2;
-            document.getElementById('inv-l3').innerText = runtimeSummary.l3;
-            document.getElementById('inv-fa').innerText = runtimeSummary.foldaxis;
-
-            document.getElementById('geoStatisticsContainer').innerHTML = calculateGeoStatistics(planarData.filter(p=>p.struct==='S0'));
+        vals.sort((x, y) => y - x);
+        let vectors = [];
+        for (let k = 0; k < 3; k++) {
+            let l = vals[k], r0 = [T[0][0]-l, T[0][1], T[0][2]], r1 = [T[1][0], T[1][1]-l, T[1][2]];
+            let cp = [r0[1]*r1[2] - r0[2]*r1[1], r0[2]*r1[0] - r0[0]*r1[2], r0[0]*r1[1] - r0[1]*r1[0]];
+            let len = Math.sqrt(cp[0]*cp[0] + cp[1]*cp[1] + cp[2]*cp[2]);
+            vectors.push(len < 1e-4 ? [0,0,1] : cp.map(x => x/len));
         }
+        return { values: vals, vectors };
+    },
 
-        function generateChecklist() {
-            const container = document.getElementById('checklistContainer');
-            container.innerHTML = "";
-            
-            let items = [];
-            if (!runtimeSummary.hasYounging) items.push("Measure younging directions to verify overturning constraints along structural segments.");
-            if (runtimeSummary.s2 === 0) items.push("Collect additional S₂ measurements to constrain cross-cutting structural plane profiles.");
-            if (runtimeSummary.foldaxis === 0) items.push("Measure fold hinge orientations (F₁) explicitly within structural fold exposures.");
-            if (runtimeSummary.l1 === 0) items.push("Acquire lineation data (L₁) for strict verification against computed statistical $\beta$-axis models.");
-            if (runtimeSummary.stations < 15) items.push("Increase structural station density inside core domains near inferred hinge zones.");
-
-            if(items.length === 0) items.push("Baseline matrix data saturated. Proceed with localized structural traverse mapping validation.");
-
-            items.forEach(msg => {
-                container.innerHTML += `
-                    <div class="checklist-item">
-                        <input type="checkbox">
-                        <div>${msg}</div>
-                    </div>
-                `;
-            });
-        }
-
-        // Modular Report Narrative Builder Functionality
-        const NarrativeBuilder = {
-            buildFabricBlock(phase) {
-                if (phase.fabricClass === "Point Cluster") {
-                    return `Structural elements display a distinct Point Cluster fabric distribution pattern. `;
-                } else if (phase.fabricClass === "Girdle") {
-                    return `The poles mapping structural planes display a standard Girdle disposition framework. `;
-                } else {
-                    return `Planar orientations display a Random fabric distribution. `;
-                }
-            },
-            buildFoldGeometryBlock(phase) {
-                if (!phase.betaAxis) return "No calculated beta axis context resolved for this profile. ";
-                let desc = MathEngine.getPlungeCharacter(phase.betaAxis.plunge);
-                return `Calculated statistical $\\beta$-axis yields an orientation of ${MathEngine.formatTrendPlunge(phase.betaAxis)} outlining a ${desc} geometry pattern with an observed cylindricity value of ${phase.cylindricity}%. `;
-            },
-            buildPhaseRelationshipsBlock(phase) {
-                let txt = `Phase F${phase.number} links structural plane architectures [${phase.planes.join(", ")}]. `;
-                if (phase.angularDifference !== null) {
-                    txt += `Angular misfit calculation against field validation anchors evaluates to ${phase.angularDifference.toFixed(1)}°, establishing a ${MathEngine.getMisfitStatus(phase.angularDifference)} mapping correlation framework. `;
-                }
-                return txt;
-            },
-            buildConfidenceBlock(phase) {
-                return `Engine confidence scoring registers at ${phase.confidence}%, controlled by structural spatial continuity, bootstrap bounds metrics, and field axis matching agreements. `;
-            },
-            buildRecommendationsBlock(phase) {
-                if (phase.confidence < 75) {
-                    return `Recommendation: Prioritize localized traverse cross-sections across inferred Phase F${phase.number} structural limits.`;
-                }
-                return `Recommendation: Confirm structural continuity constraints inside peripheral structural sub-domains.`;
-            },
-            compileFullNarrative(phase) {
-                return `<p style="margin-bottom: 12px;"><strong>Phase F${phase.number} Synthesis Profile:</strong> ` +
-                       this.buildFabricBlock(phase) +
-                       this.buildFoldGeometryBlock(phase) +
-                       this.buildPhaseRelationshipsBlock(phase) +
-                       this.buildConfidenceBlock(phase) +
-                       this.buildRecommendationsBlock(phase) + `</p>`;
-            }
-        };
-
-        function buildStaticWarningSection() {
-            const container = document.getElementById('polyphaseWarningContainer');
-            container.innerHTML = "";
-            
-            let text = "";
-            let type = "warn";
-
-            if (runtimeSummary.s0 > 0 && runtimeSummary.s1 > 0 && runtimeSummary.s2 > 0 && runtimeSummary.s3 > 0) {
-                text = "Complete deformation history available (S0, S1, S2, and S3 elements fully registered).";
-                type = "pass";
-            } else if (runtimeSummary.s0 > 0 && runtimeSummary.s1 > 0 && runtimeSummary.s2 > 0) {
-                text = "Polyphase evaluation enabled (S0, S1, and S2 tracking pairs operational).";
-                type = "pass";
-            } else if (runtimeSummary.s0 > 0 && runtimeSummary.s1 > 0) {
-                text = "One deformation phase recognised (S0 + S1 system framework mapped).";
-                type = "warn";
-            } else if (runtimeSummary.s0 > 0) {
-                text = "Polyphase unavailable (Only S0 bedding instances detected in data framework).";
-                type = "warn";
-            } else {
-                text = "Insufficient primary structural layout properties parsed.";
-                type = "warn";
-            }
-
-            container.innerHTML = `<div class="qc-item qc-${type}"><strong>System Phase Monitor:</strong> ${text}</div>`;
-        }
-
-function executeSuite() {
-    const rawText = document.getElementById('csvInput').value;
-    
-    // ==========================================
-    // 1. BG2.2 INTEGRATED PARSER CORE WITH REGEX SAFETY
-    // ==========================================
-    Survey.clear();
-    planarData = []; 
-    linearData = [];
-    
-    const lines = rawText.split(/\r?\n/);
-    const csvRegex = /,(?=(?:(?:[^"]*"){2})*[^"]*$)/; 
-    const activeLogs = [];
-
-    let startIdx = 0;
-    if (lines[0] && (lines[0].toLowerCase().includes("strike") || lines[0].toLowerCase().includes("type") || lines[0].toLowerCase().includes("structure"))) {
-        startIdx = 1; 
-    }
-
-    for (let i = startIdx; i < lines.length; i++) {
-        if (!lines[i].trim()) continue;
+    calculateFisherStatistics(subset) {
+        if(subset.length === 0) return { meanTrend:0, meanPlunge:0, k:0, alpha95:0 };
+        let R = [0,0,0]; subset.forEach(p => { for(let i=0; i<3; i++) R[i] += p.vector[i]; });
+        let rLen = Math.sqrt(R[0]*R[0] + R[1]*R[1] + R[2]*R[2]);
+        let meanV = R.map(x => x / rLen);
+        let tp = this.vectorToTrendPlunge(meanV);
         
-        const tokens = lines[i].split(csvRegex).map(item => item.replace(/^"| Kent"$/g, '').trim());
-        if (tokens.length < 2) { 
-            Survey.metadata.failures++; 
-            activeLogs.push({ type: 'warning', msg: `Row ${i+1}: Incomplete structural data columns.` });
-            continue; 
-        }
+        let n = subset.length;
+        let k = n > 1 ? (n - 1) / (n - rLen) : 0;
+        let alpha95 = (n > 1 && k > 0) ? (140 / Math.sqrt(k * n)) : 0;
 
-        Survey.metadata.totalRecords++;
-        const type = tokens[0].toLowerCase().trim();
-        const measurement = tokens[1];
-        const rawPhaseId = tokens[2] || "";
-        const meta = tokens[3] || "";
+        return { meanTrend: tp.trend, meanPlunge: tp.plunge, k, alpha95 };
+    },
 
-        // Intelligently fallback or normalize Phase IDs to stay aligned with uniqueDeformationPairs (S0, S1, S2, S3)
-        let phaseId = "S0";
-        if (rawPhaseId.toUpperCase().includes("S3")) phaseId = "S3";
-        else if (rawPhaseId.toUpperCase().includes("S2")) phaseId = "S2";
-        else if (rawPhaseId.toUpperCase().includes("S1")) phaseId = "S1";
-        else if (rawPhaseId.toUpperCase().includes("S0")) phaseId = "S0";
-        else if (type === 'planar' || type === 'bedding' || type === 'foliation') {
-            // Implicit default mapping based on standard geological schema if field missing
-            phaseId = (type === 'bedding') ? 'S0' : 'S1';
-        }
+    calculateBetaAxis(subset) {
+        if(subset.length < 2) return { trend: 0, plunge: 0 };
+        let eigen = this.solveEigenstructures(this.buildOrientationTensor(subset));
+        return this.vectorToTrendPlunge(eigen.vectors[2]);
+    },
 
-        if (type === 'planar' || type === 'bedding' || type === 'foliation') {
-            const parts = measurement.split('/').map(Number);
-            if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1]) && parts[0] <= 360 && parts[1] <= 90) {
-                const item = { strike: parts[0], dip: parts[1], meta: meta, struct: phaseId };
-                Survey.getOrCreatePhase(phaseId, meta).planarElements.push(item);
-                planarData.push(item); 
-            } else { 
-                Survey.metadata.failures++; 
-                activeLogs.push({ type: 'error', msg: `Row ${i+1}: Invalid Planar Orientation Data Format.` });
+    calculateRMS(subset, beta) {
+        if(!beta || subset.length === 0) return 0;
+        let b = this.trendPlungeToVector(beta.trend, beta.plunge), sum = 0;
+        subset.forEach(p => {
+            let d = Math.abs(p.vector[0]*b[0] + p.vector[1]*b[1] + p.vector[2]*b[2]);
+            let dev = Math.abs(Math.acos(Math.max(-1, Math.min(1, d))) * 180 / Math.PI - 90); sum += dev * dev;
+        });
+        return Math.sqrt(sum / subset.length);
+    },
+
+    // 8. 1000-Cycle Bootstrap Engine
+    calculateBetaBootstrap(subset) {
+        if (subset.length < 3) return { trend: 0, plunge: 0, ci95: 0 };
+        let axes = [];
+        for (let i = 0; i < 1000; i++) {
+            let sample = [];
+            for (let j = 0; j < subset.length; j++) {
+                let rndIdx = Math.floor(Math.random() * subset.length);
+                sample.push(subset[rndIdx]);
             }
-        } else if (type === 'linear' || type === 'lineation' || type === 'foldaxis') {
-            const parts = measurement.split('/').map(Number);
-            if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1]) && parts[0] <= 360 && parts[1] <= 90) {
-                // Dynamically map generation flags for calculation loops
-                let genNum = 1;
-                if (phaseId === "S2") genNum = 2;
-                if (phaseId === "S3") genNum = 3;
-                
-                const item = { trend: parts[0], plunge: parts[1], meta: meta, struct: phaseId, generation: genNum };
-                Survey.getOrCreatePhase(phaseId, meta).linearElements.push(item);
-                linearData.push(item); 
-            } else { 
-                Survey.metadata.failures++; 
-                activeLogs.push({ type: 'error', msg: `Row ${i+1}: Invalid Linear Orientation Data Format.` });
-            }
+            axes.push(this.calculateBetaAxis(sample));
         }
-    }
-
-    // Render Quality Control Dashboard Elements
-    const logDiv = document.getElementById('qcLogs');
-    logDiv.innerHTML = "";
-    if (activeLogs.length === 0) {
-        activeLogs.push({ type: 'success', msg: `Dataset structural parse successful! Synthesized ${Survey.metadata.totalRecords} records.` });
-    }
-    activeLogs.forEach(l => {
-        let div = document.createElement('div');
-        div.className = `qc-item qc-${l.type}`;
-        div.innerText = l.msg;
-        logDiv.appendChild(div);
-    });
-
-    // Safeguard Execution Block
-    if (planarData.length === 0 && linearData.length === 0) return;
-
-    displayDatasetCounts();
-    VisualizationEngine.render();
-    generateChecklist();
-    buildStaticWarningSection();
-
-    // =========================================================================
-    // 2. CORE MATHEMATICAL SUB-STAGE MATRIX OPERATIONS & VIEW GENERATION
-    // =========================================================================
-    const tensorContainer = document.getElementById('tensorContainer');
-    const foldContainer = document.getElementById('foldGeometryContainer');
-    
-    tensorContainer.innerHTML = "";
-    foldContainer.innerHTML = "";
-
-    // Resetting Deformation Master Manager Instance
-    PhaseManager.phases = [];
-
-    let uniqueDeformationPairs = [
-        { id: 1, p1: 'S0', p2: 'S1', label: 'β(S0,S1)', measuredType: 'FOLDAXIS', lineationType: 'L1' },
-        { id: 2, p1: 'S1', p2: 'S2', label: 'β(S1,S2)', measuredType: 'FOLDAXIS', lineationType: 'L2' },
-        { id: 3, p1: 'S2', p2: 'S3', label: 'β(S2,S3)', measuredType: 'FOLDAXIS', lineationType: 'L3' }
-    ];
-
-    uniqueDeformationPairs.forEach(pair => {
-        let subset1 = planarData.filter(p => p.struct === pair.p1);
-        let subset2 = planarData.filter(p => p.struct === pair.p2);
-        let combinedPoles = [...subset1, ...subset2];
         
-        if (combinedPoles.length < 2 && pair.id === 1 && subset1.length >= 2) {
-            combinedPoles = subset1; 
-        }
+        // Compute structural vector mean of bootstrap output population
+        let R = [0,0,0];
+        axes.forEach(a => {
+            let v = this.trendPlungeToVector(a.trend, a.plunge);
+            for(let i=0; i<3; i++) R[i] += v[i];
+        });
+        let rLen = Math.sqrt(R[0]*R[0] + R[1]*R[1] + R[2]*R[2]);
+        let bMean = this.vectorToTrendPlunge(R.map(x => x / rLen));
 
-        if (combinedPoles.length >= 2 || pair.id <= 2) { 
-            let T = MathEngine.buildOrientationTensor(combinedPoles.length >= 2 ? combinedPoles : planarData.filter(p => p.struct === 'S0'));
-            let eigen = MathEngine.solveEigenstructures(T);
-            
-            let betaAxis = MathEngine.calculateBetaAxis(combinedPoles.length >= 2 ? combinedPoles : planarData.filter(p => p.struct === 'S0'));
-            
-            if (combinedPoles.length < 2) {
-                if (pair.id === 1) { betaAxis = { trend: 45, plunge: 2 }; }
-                if (pair.id === 2) { betaAxis = { trend: 314, plunge: 18 }; }
-                if (pair.id === 3) { betaAxis = { trend: 45, plunge: 2 }; }
-            }
+        // Compute 95th-percentile angular envelope spread radius
+        let devAngles = axes.map(a => {
+            return this.getAngle(this.trendPlungeToVector(bMean.trend, bMean.plunge), this.trendPlungeToVector(a.trend, a.plunge));
+        }).sort((x, y) => x - y);
+        let ci95 = devAngles[949] || 0; 
 
-            let fabricClass = eigen.values[0] > 0.85 ? "Point Cluster" : (eigen.values[0] > 0.4 && eigen.values[1] > 0.4 ? "Girdle" : "Random");
-            let cylindricity = MathEngine.calculateCylindricity(eigen.values);
-            if (cylindricity === 0) {
-                cylindricity = pair.id === 1 ? 96 : (pair.id === 2 ? 92 : 45);
-            }
+        return { trend: bMean.trend, plunge: bMean.plunge, ci95 };
+    },
 
-            let rmsMisfit = MathEngine.calculateRMS(betaAxis, combinedPoles);
-            if (rmsMisfit === 0) { rmsMisfit = pair.id === 1 ? 1.25 : 2.1; }
+    // 9. Step-Function Cylindricity Index
+    calculateCylindricityFromRMS(rms) {
+        if (rms < 3) return 100;
+        if (rms < 6) return 90;
+        if (rms < 10) return 80;
+        if (rms < 15) return 70;
+        return 50;
+    },
 
-            let bootstrapCI = MathEngine.calculateBootstrapPrecision(rmsMisfit);
-            let precisionLabel = bootstrapCI <= 2.0 ? "Excellent precision" : (bootstrapCI <= 12.0 ? "Moderate precision" : "Low confidence");
+    getPlungeCharacter(p) {
+        return p < 10 ? "Nearly Horizontal" : (p < 30 ? "Gently Plunging" : (p < 60 ? "Moderately Plunging" : (p < 80 ? "Steeply Plunging" : "Nearly Vertical")));
+    },
+    getAngle(v1, v2) {
+        return Math.acos(Math.max(-1, Math.min(1, Math.abs(v1[0]*v2[0] + v1[1]*v2[1] + v1[2]*v2[2])))) * 180 / Math.PI;
+    },
+    trendPlungeToVector(t, p) {
+        let rT = t * Math.PI / 180, rP = p * Math.PI / 180;
+        return [Math.cos(rP) * Math.sin(rT), Math.cos(rP) * Math.cos(rT), Math.sin(rP)];
+    },
+    vectorToTrendPlunge(v) {
+        let s = v[2] < 0 ? -1 : 1, x = v[0]*s, y = v[1]*s, z = v[2]*s;
+        let p = Math.asin(Math.max(-1, Math.min(1, z))) * 180 / Math.PI;
+        let t = Math.atan2(x, y) * 180 / Math.PI; return { trend: t < 0 ? t + 360 : t, plunge: p };
+    },
+    formatTrendPlunge(tp) {
+        return tp ? `${Math.round(tp.trend).toString().padStart(3,'0')}/${Math.round(tp.plunge).toString().padStart(2,'0')}` : "000/00";
+    },
+    getCorrelationGrade(diff) {
+        if (diff === null) return "No Data";
+        if (diff < 10) return "Excellent";
+        if (diff <= 20) return "Good";
+        if (diff <= 35) return "Moderate";
+        return "Poor";
+    }
+};
 
-            // Explicit Component-Weighting Confidence Engine Calculation Formulation
-            let coverageWeight = runtimeSummary.stations >= 6 ? 20 : 10;
-            let tensorWeight = eigen.values[0] > 0.5 ? 20 : 10;
-            let bootstrapWeight = bootstrapCI <= 5.0 ? 15 : 5;
-            let spatialWeight = runtimeSummary.domains.length >= 1 ? 15 : 5;
-            
-            let genAxes = foldAxesByGeneration[pair.id] || [];
-            let foldAgreementWeight = genAxes.length > 0 ? 15 : 10;
-            
-            let matchLineations = linearData.filter(l => l.generation === pair.id || l.struct === pair.lineationType);
-            let lineationAgreementWeight = matchLineations.length > 0 ? 15 : 10;
+// ==========================================
+// 4. GENERATION-WISE PIPELINE CONTROLLERS
+// ==========================================
+function analysePlanarGeneration(phase, data, databaseRef) {
+    // 3. Complete Beta Engine execution payload block
+    let tensor = MathEngine.buildOrientationTensor(data);
+    let eigen = MathEngine.solveEigenstructures(tensor);
+    let beta = MathEngine.calculateBetaAxis(data);
+    let rms = MathEngine.calculateRMS(data, beta);
+    let bootstrap = MathEngine.calculateBetaBootstrap(data);
+    let cylindricity = MathEngine.calculateCylindricityFromRMS(rms);
+    let fisher = MathEngine.calculateFisherStatistics(data);
 
-            let totalConfidence = MathEngine.calculateConfidence(coverageWeight, tensorWeight, bootstrapWeight, spatialWeight, foldAgreementWeight, lineationAgreementWeight);
+    // 4. Static Fold Axis Relation Matching Dictionary
+    const foldRelation = { S0: "FA1", S1: "FA1", S2: "FA2", S3: "FA3" };
+    let targetFA = foldRelation[phase];
+    let measuredFACorpus = databaseRef.foldAxis[targetFA] || [];
+    let faMean = measuredFACorpus.length > 0 ? MathEngine.calculateFisherMean(measuredFACorpus) : null;
+    let faMisfit = faMean ? MathEngine.getAngle(MathEngine.trendPlungeToVector(beta.trend, beta.plunge), MathEngine.trendPlungeToVector(faMean.trend, faMean.plunge)) : null;
+    let faCorrelation = MathEngine.getCorrelationGrade(faMisfit);
 
-            let measuredAxisMean = null;
-            let angularDiff = null;
+    // 5. Static Lineation Relation Matching Dictionary
+    const lineationLink = { S0: "L1", S1: "L1", S2: "L2", S3: "L3" };
+    let targetL = lineationLink[phase];
+    let measuredLCorpus = databaseRef.linear[targetL] || [];
+    let lMean = measuredLCorpus.length > 0 ? MathEngine.calculateFisherMean(measuredLCorpus) : null;
+    let lMisfit = lMean ? MathEngine.getAngle(MathEngine.trendPlungeToVector(beta.trend, beta.plunge), MathEngine.trendPlungeToVector(lMean.trend, lMean.plunge)) : null;
+    let lCorrelation = MathEngine.getCorrelationGrade(lMisfit);
 
-            if (genAxes.length > 0) {
-                measuredAxisMean = MathEngine.calculateFisherMean(genAxes);
-                let vCalc = MathEngine.trendPlungeToVector(betaAxis.trend, betaAxis.plunge);
-                let vMeas = MathEngine.trendPlungeToVector(measuredAxisMean.trend, measuredAxisMean.plunge);
-                angularDiff = MathEngine.getAngle(vCalc, vMeas);
-            } else {
-                angularDiff = pair.id === 1 ? 1.4 : 0.8;
-                if (pair.id === 1) measuredAxisMean = { trend: 46, plunge: 3 };
-                if (pair.id === 2) measuredAxisMean = { trend: 313, plunge: 18 };
-            }
-
-            // Initializing Master Structural Object Instantiation
-            let phaseObj = {
-                number: pair.id,
-                planes: [pair.p1, pair.p2],
-                betaAxis: betaAxis,
-                measuredFoldAxis: measuredAxisMean,
-                associatedLineation: matchLineations.length > 0 ? MathEngine.calculateFisherMean(matchLineations) : (pair.id === 1 ? {trend: 45, plunge: 4} : {trend: 315, plunge: 16}),
-                angularDifference: angularDiff,
-                bootstrapStatistics: { ci: bootstrapCI, label: precisionLabel },
-                confidence: totalConfidence,
-                fabricClass: fabricClass,
-                cylindricity: cylindricity,
-                rms: rmsMisfit,
-                suitability: MathEngine.evaluateSuitability(cylindricity),
-                interpretation: ""
-            };
-
-            PhaseManager.phases.push(phaseObj);
-        }
-    });
-
-    let f1 = PhaseManager.phases.find(p => p.number === 1) || PhaseManager.phases[0];
+    // 14. Explicit Reliability Index System Scorer
+    let breakDown = [];
+    let rScore = 0;
     
-    // Dynamic Tensors Framework View Outputs
-    PhaseManager.phases.forEach(phase => {
-        let interpretationText = phase.fabricClass === "Girdle" ? 
-            "The bedding poles define a girdle structure indicating clear girdle rotation distribution pathways." : 
-            "The bedding poles form a concentrated cluster highlighting uniform regional domain distributions.";
+    if (runtimeSummary.stations >= 10) { rScore += 20; breakDown.push("+20 Station Density"); }
+    if (data.length >= 10) { rScore += 15; breakDown.push("+15 Planar Coverage"); }
+    if (measuredLCorpus.length > 0) { rScore += 15; breakDown.push("+15 Linear Presence"); }
+    if (measuredFACorpus.length > 0) { rScore += 15; breakDown.push("+15 Hinge Controls"); }
+    if (bootstrap.ci95 < 10 && bootstrap.ci95 > 0) { rScore += 15; breakDown.push("+15 Bootstrap Conf"); }
+    if (eigen.values[0] > 0.4) { rScore += 10; breakDown.push("+10 Tensor Structural Stability"); }
+    if (rms < 8) { rScore += 10; breakDown.push("+10 Low RMS Variance"); }
 
-        tensorContainer.innerHTML += `
-            <div style="font-size:13px; font-weight:700; margin-top:12px; color:var(--text-dark);">Phase F${phase.number} [${phase.planes.join("-")}] Orientation Tensor Statistics</div>
-            <table>
-                <tr><th>Fabric Distribution</th><td><strong>${phase.fabricClass}</strong></td></tr>
-                <tr><th>Suitability Assessment</th><td>${phase.suitability} (Cylindricity: ${phase.cylindricity}%)</td></tr>
-                <tr><th>Bootstrap Precision</th><td>±${phase.bootstrapStatistics.ci.toFixed(1)}° (${phase.bootstrapStatistics.label})</td></tr>
-                <tr><th>Interpretation Context</th><td>${interpretationText}</td></tr>
-            </table>
-        `;
-    });
-
-    // Updating Main Summary Card Layout Elements Dynamic Paths
-    let charStr = MathEngine.getPlungeCharacter(f1.betaAxis.plunge);
-    document.getElementById('card-trend-plunge').innerHTML = `Trend: ${Math.round(f1.betaAxis.trend).toString().padStart(3,'0')}°<br>Plunge: ${Math.round(f1.betaAxis.plunge).toString().padStart(2,'0')}°`;
-    document.getElementById('card-cyl-val').innerText = `${f1.cylindricity}%`;
-    document.getElementById('card-cyl-profile').innerText = `${f1.rms.toFixed(2)}° ${MathEngine.getMisfitStatus(f1.rms)} Cylindrical Fit`;
-    document.getElementById('card-character').innerText = charStr;
-
-    // Updating Validation Matrix Summaries
-    PhaseManager.phases.forEach(phase => {
-        let desc = MathEngine.getPlungeCharacter(phase.betaAxis.plunge);
-        foldContainer.innerHTML += `
-            <div style="font-size:13px; font-weight:700; margin-top:12px; color:var(--text-dark);">Best-fit ${phase.planes[0]}-${phase.planes[1]} Intersections (Phase F${phase.number})</div>
-            <table>
-                <tr><th>Calculated β-axis</th><td>${MathEngine.formatTrendPlunge(phase.betaAxis)} (${desc})</td></tr>
-                <tr><th>Girdle Residual Dispersion (RMS)</th><td>${phase.rms.toFixed(2)}° — <span style="color:var(--success); font-weight:700;">${MathEngine.getMisfitStatus(phase.rms)} Fit Matrix</span></td></tr>
-            </table>
-        `;
-    });
-
-    // Updating Multi-Criteria Reliability Indicators Panels
-    document.getElementById('conf-overall').innerText = `${f1.confidence}%`;
-    let starsStr = f1.confidence >= 90 ? "★★★★★" : (f1.confidence >= 75 ? "★★★★☆" : "★★★☆☆");
-    document.getElementById('conf-stars').innerText = starsStr;
-
-    // Rebuild the Correlation Output Evidence Table Matrix
-    const corrContainer = document.getElementById('correlationContainer');
-    corrContainer.innerHTML = "";
-
-    let evidenceTableHtml = `
-        <div style="font-size:13px; font-weight:700; margin-top:12px; color:var(--text-dark);">Deformation Phase &amp; β-Axis Verification Evidence Table Matrix</div>
-        <table>
-            <thead>
-                <tr>
-                    <th>Phase</th>
-                    <th>Calculated β</th>
-                    <th>Measured Fold Axis</th>
-                    <th>Lineation Anchor</th>
-                    <th>Angular Difference</th>
-                    <th>Status Reliability</th>
-                </tr>
-            </thead>
-            <tbody>`;
-
-    let overallMisfitSum = 0;
-    let verifiedCount = 0;
-
-    PhaseManager.phases.forEach(phase => {
-        let calcStr = MathEngine.formatTrendPlunge(phase.betaAxis);
-        let measStr = phase.measuredFoldAxis ? MathEngine.formatTrendPlunge(phase.measuredFoldAxis) : "-- / --";
-        let linStr = phase.associatedLineation ? `L${phase.number} = ${MathEngine.formatTrendPlunge(phase.associatedLineation)}` : "--";
-        let diffStr = phase.angularDifference !== null ? `${phase.angularDifference.toFixed(1)}°` : "--";
-        let statusLabel = phase.angularDifference !== null ? MathEngine.getMisfitStatus(phase.angularDifference) : "Pending Data";
-
-        if(phase.angularDifference !== null) {
-            overallMisfitSum += phase.angularDifference;
-            verifiedCount++;
-        }
-
-        evidenceTableHtml += `
-            <tr>
-                <td><strong>F${phase.number}</strong> (β between ${phase.planes.join("-")})</td>
-                <td>${calcStr}</td>
-                <td>${measStr}</td>
-                <td>${linStr}</td>
-                <td>${diffStr}</td>
-                <td><span style="font-weight:700; color:${statusLabel === 'Excellent' || statusLabel === 'Good' ? 'var(--success)' : 'var(--warning)'};">✓ ${statusLabel}</span></td>
-            </tr>`;
-    });
-
-    let averageMisfit = verifiedCount > 0 ? (overallMisfitSum / verifiedCount) : 0.0;
-    let finalReliabilityLabel = MathEngine.getMisfitStatus(averageMisfit);
-
-    evidenceTableHtml += `
-        <tr>
-            <th colspan="4" style="text-align:right; background:#f8fafc;">Average Angular Mismatch:</th>
-            <td style="font-weight:bold; background:#f8fafc;">${averageMisfit.toFixed(1)}°</td>
-            <td style="font-weight:bold; background:#f8fafc; color:var(--success);">${finalReliabilityLabel} Reliability</td>
-        </tr>
-    </tbody></table>`;
-    
-    corrContainer.innerHTML = evidenceTableHtml;
-    document.getElementById('conf-verification').innerText = `Passed (${finalReliabilityLabel} Fit Metrics Verified)`;
-
-    buildInterpretationBox();
+    return {
+        phase, dataCount: data.length, tensor, eigen, beta, rms, bootstrap, cylindricity, fisher,
+        measuredFA: targetFA, faMean, faMisfit, faCorrelation,
+        measuredL: targetL, lMean, lMisfit, lCorrelation,
+        reliability: rScore, evidence: breakDown
+    };
 }
 
-        function buildInterpretationBox() {
-            const ic = document.getElementById('interpretationContainer');
-            const nc = document.getElementById('limitationsContainer');
+// 10. Multi-Domain Partition Pipeline execution
+function executeStructuralSynthesisPipeline() {
+    // A. Execute over Global Data Cache
+    const phases = ["S0", "S1", "S2", "S3"];
+    for (const phase of phases) {
+        const planes = structuralDB.planar[phase];
+        if (planes.length < 3) continue;
+        analysisResults.global[phase] = analysePlanarGeneration(phase, planes, structuralDB);
+    }
 
-            let paragraphsHtml = "";
-            let finalDiagnosisText = "";
-
-            // Loop through master phase array using modular segment rules
-            PhaseManager.phases.forEach(phase => {
-                paragraphsHtml += NarrativeBuilder.compileFullNarrative(phase);
-            });
-
-            // Generating Adaptive Diagnostic Analysis Strings
-            if (PhaseManager.phases.length >= 2) {
-                let p1 = PhaseManager.phases[0];
-                let p2 = PhaseManager.phases[1];
-                let angleBetweenBetas = MathEngine.getAngle(
-                    MathEngine.trendPlungeToVector(p1.betaAxis.trend, p1.betaAxis.plunge),
-                    MathEngine.trendPlungeToVector(p2.betaAxis.trend, p2.betaAxis.plunge)
-                );
-
-                finalDiagnosisText = `Polyphase overprinting deformation sequence resolved. Phase F1 and Phase F2 axes cross-cutting profile tracks register an angular difference of ${angleBetweenBetas.toFixed(1)}°. `;
-                if(angleBetweenBetas > 20) {
-                    finalDiagnosisText += `This high angular separation provides strong quantitative evidence for non-coaxial refolding systems across local structures.`;
-                } else {
-                    finalDiagnosisText += `The close spatial alignment points toward coaxial overprinting folding structural distributions.`;
-                }
-            } else if (PhaseManager.phases.length === 1) {
-                finalDiagnosisText = `Single-phase deformation development profile observed. Data maps uniform orientation alignments across local domains cleanly.`;
-            } else {
-                finalDiagnosisText = `Baseline planar constraints parsed do not show coherent structural folding phase profiles.`;
-            }
-
-            ic.innerHTML = `
-                <div class="interpretation-box">
-                    <strong>Modular Structural Interpretation Block Output</strong><br><br>
-                    ${paragraphsHtml}
-                </div>
-                <div class="diagnosis-banner">
-                    <h4>FINAL DIAGNOSIS STATUS ENGINE</h4>
-                    <p>${finalDiagnosisText}</p>
-                </div>
-            `;
-
-            nc.innerHTML = `
-                <ul style="padding-left:20px; font-size:13px;">
-                    <li>Calculated β-axes are strictly structural calculations based on directional clusters. These statistical values require confirmation through explicit outcropping hinge-zone mapping.</li>
-                    <li>The statistical accuracy of calculations scales dynamically with the localized variation and spatial density of input structural stations.</li>
-                </ul>
-                <div class="caution-box">
-                    <strong>Operational Quality Notice:</strong> Calculations assume perfect single-domain behavior. Complex structural cross-cutting relationships require independent multi-domain partitioning checks.
-                </div>
-                <footer class="report-footer">
-                    <div class="footer-grid">
-                        <div><strong>Engine Framework:</strong> v1.2.0 Fully Modular Core</div>
-                        <div><strong>Data Volume:</strong> n = ${runtimeSummary.measurements} Geometries</div>
-                        <div><strong>System Date:</strong> 02-Jul-2026 | Verified Output</div>
-                    </div>
-                </footer>
-            `;
+    // B. Partition analysis over separate isolated domain records
+    for (const domain in structuralDB.domains) {
+        analysisResults.domains[domain] = {};
+        let domDB = structuralDB.domains[domain];
+        for (const phase of phases) {
+            const planes = domDB.planar[phase];
+            if (planes.length < 3) continue;
+            analysisResults.domains[domain][phase] = analysePlanarGeneration(phase, planes, domDB);
         }
+    }
+}
 
-        function toggleTextArea() {
-            const container = document.getElementById('textareaContainer');
-            container.style.display = (container.style.display === 'block') ? 'none' : 'block';
+// ==========================================
+// 5. GRAPHICS WORKSPACE RUNTIME PIPELINE
+// ==========================================
+const VisualizationEngine = {
+    render() {
+        const cv = document.getElementById('stereoCanvas'); if (!cv) return;
+        const ctx = cv.getContext('2d'); ctx.clearRect(0,0,300,300);
+        const cx = 150, cy = 150, r = 110;
+        ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, 2*Math.PI); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx, cy-r); ctx.lineTo(cx, cy+r); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx-r, cy); ctx.lineTo(cx+r, cy); ctx.stroke();
+
+        let allRecords = [];
+        ['S0','S1','S2','S3'].forEach(k => allRecords = allRecords.concat(structuralDB.planar[k]));
+        ['L1','L2','L3'].forEach(k => allRecords = allRecords.concat(structuralDB.linear[k]));
+        ['FA1','FA2','FA3'].forEach(k => allRecords = allRecords.concat(structuralDB.foldAxis[k]));
+
+        allRecords.forEach(p => {
+            let [nx, ny, nz] = p.vector, f = Math.sqrt(1 / (1 + Math.abs(nz)));
+            let cfg = symbolsConfig[p.struct] || { char: '●', color: '#0f172a' };
+            ctx.fillStyle = cfg.color; ctx.font = "bold 12px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText(cfg.char, cx + r * nx * f, cy - r * ny * f);
+        });
+
+        const mCv = document.getElementById('mapCanvas'); const mCtx = mCv.getContext('2d');
+        mCtx.clearRect(0,0,300,300); mCtx.strokeStyle = '#f1f5f9';
+        for(let g=20; g<300; g+=25) {
+            mCtx.beginPath(); mCtx.moveTo(g, 0); mCtx.lineTo(g, 300); mCtx.stroke();
+            mCtx.beginPath(); mCtx.moveTo(0, g); mCtx.lineTo(300, g); mCtx.stroke();
         }
+        if (allRecords.length === 0) return;
+        let lats = allRecords.map(p => p.lat), lons = allRecords.map(p => p.lon);
+        let minLa = Math.min(...lats), maxLa = Math.max(...lats), minLo = Math.min(...lons), maxLo = Math.max(...lons);
+        let printed = new Set();
+        allRecords.forEach(p => {
+            let x = 40 + ((p.lon - minLo) / (maxLo - minLo || 1)) * 220, y = 260 - ((p.lat - minLa) / (maxLa - minLa || 1)) * 220;
+            if (printed.has(p.station + p.struct)) return; printed.add(p.station + p.struct);
+            mCtx.fillStyle = (symbolsConfig[p.struct] || { color: '#0f172a' }).color;
+            mCtx.beginPath(); mCtx.arc(x, y, 4, 0, 2*Math.PI); mCtx.fill();
+            mCtx.font = '9px monospace'; mCtx.fillStyle = '#475569'; mCtx.fillText(p.station, x + 6, y + 3);
+        });
+    }
+};
 
-        function toggleAdvancedSettings() {
-            const el = document.getElementById('advancedContent');
-            el.style.display = (el.style.display === 'block') ? 'none' : 'block';
+function displayDatasetCounts() {
+    document.getElementById('inv-stations').innerText = runtimeSummary.stations;
+    document.getElementById('inv-total').innerText = runtimeSummary.measurements;
+    document.getElementById('inv-domains').innerText = runtimeSummary.domains.length;
+    document.getElementById('inv-litho').innerText = runtimeSummary.lithologies.length;
+
+    document.getElementById('inv-s0').innerText = structuralDB.planar.S0.length;
+    document.getElementById('inv-s1').innerText = structuralDB.planar.S1.length;
+    document.getElementById('inv-s2').innerText = structuralDB.planar.S2.length;
+    document.getElementById('inv-s3').innerText = structuralDB.planar.S3.length;
+
+    document.getElementById('inv-l1').innerText = structuralDB.linear.L1.length;
+    document.getElementById('inv-l2').innerText = structuralDB.linear.L2.length;
+    document.getElementById('inv-l3').innerText = structuralDB.linear.L3.length;
+    
+    let totalFA = structuralDB.foldAxis.FA1.length + structuralDB.foldAxis.FA2.length + structuralDB.foldAxis.FA3.length;
+    document.getElementById('inv-fa').innerText = totalFA;
+
+    const s0S = structuralDB.planar.S0;
+    if (s0S.length > 0) {
+        let dips = s0S.map(p => p.dip), avg = dips.reduce((a,b)=>a+b,0)/dips.length;
+        document.getElementById('geoStatisticsContainer').innerHTML = `<table><tr><th>Avg Bedding Dip</th><td>${avg.toFixed(0)}°</td></tr><tr><th>Min/Max Dip</th><td>${Math.min(...dips)}° / ${Math.max(...dips)}°</td></tr></table>`;
+    }
+}
+
+// ==========================================
+// 6. NARRATIVE, LOGIC & REPORTS COMPILER
+// ==========================================
+function buildStructuralReportingSuites() {
+    const tC = document.getElementById('tensorContainer'), fC = document.getElementById('foldGeometryContainer');
+    tC.innerHTML = ""; fC.innerHTML = "";
+
+    let primaryKey = analysisResults.global.S0 ? "S0" : (analysisResults.global.S1 ? "S1" : null);
+    if (!primaryKey && Object.keys(analysisResults.global).length > 0) primaryKey = Object.keys(analysisResults.global)[0];
+    
+    if (!primaryKey) return;
+    let mainReport = analysisResults.global[primaryKey];
+
+    // Populate Side Widgets Panel Tensors
+    for (let pKey in analysisResults.global) {
+        let r = analysisResults.global[pKey];
+        tC.innerHTML += `<div style="font-size:13px; font-weight:700; margin-top:8px;">Generation ${r.phase} Spatial Tensor</div><table><tr><th>Cylindricity</th><td>${r.cylindricity}%</td></tr><tr><th>Fisher Disp (k)</th><td>${r.fisher.k.toFixed(1)}</td></tr></table>`;
+        fC.innerHTML += `<div style="font-size:13px; font-weight:700; margin-top:8px;">Generation ${r.phase} Beta Calculation</div><table><tr><th>Calculated β-axis</th><td>${MathEngine.formatTrendPlunge(r.beta)}</td></tr><tr><th>95% Bootstrap CI</th><td>±${r.bootstrap.ci95.toFixed(1)}°</td></tr></table>`;
+    }
+
+    // Assign top banner structural information elements
+    document.getElementById('card-trend-plunge').innerHTML = `Trend: ${Math.round(mainReport.beta.trend).toString().padStart(3,'0')}°<br>Plunge: ${Math.round(mainReport.beta.plunge).toString().padStart(2,'0')}°`;
+    document.getElementById('card-cyl-val').innerText = `${mainReport.cylindricity}%`;
+    document.getElementById('card-cyl-profile').innerText = `RMS ${mainReport.rms.toFixed(2)}° Residual`;
+    document.getElementById('card-character').innerText = MathEngine.getPlungeCharacter(mainReport.beta.plunge);
+    document.getElementById('conf-overall').innerText = `${mainReport.reliability}%`;
+    document.getElementById('conf-stars').innerText = mainReport.reliability >= 75 ? "★★★★★" : "★★★☆☆";
+    document.getElementById('conf-verification').innerText = `Verification markers: ${mainReport.evidence.join(', ')}`;
+
+    // 6. Phase Summary Correlation Matrix Generation
+    let tbl = `<div style="font-size:13px; font-weight:700; margin-top:10px;">Phase Correlation Evaluation Summary Matrix</div><table><thead><tr><th>Phase Map</th><th>Calc Beta</th><th>Field Hinge</th><th>Correlation</th><th>Kinematic Lineation</th><th>Correlation</th></tr></thead><tbody>`;
+    for (let pKey in analysisResults.global) {
+        let r = analysisResults.global[pKey];
+        let faStr = r.faMean ? MathEngine.formatTrendPlunge(r.faMean) : "Missing";
+        let lStr = r.lMean ? MathEngine.formatTrendPlunge(r.lMean) : "Missing";
+        tbl += `<tr><td><strong>${r.phase}</strong></td><td>${MathEngine.formatTrendPlunge(r.beta)}</td><td>${faStr} (${r.measuredFA})</td><td><span class="badge">${r.faCorrelation}</span></td><td>${lStr} (${r.measuredL})</td><td><span class="badge">${r.lCorrelation}</span></td></tr>`;
+    }
+    document.getElementById('correlationContainer').innerHTML = tbl + "</tbody></table>";
+
+    // 11. Custom Array-Pushed Variable Narrative Engine
+    const narrative = [];
+    for (let pKey in analysisResults.global) {
+        let r = analysisResults.global[pKey];
+        narrative.push(`<h4>Structural Synthesis Profiling for Generation Layer ${r.phase}:</h4>`);
+        if (r.cylindricity >= 90) {
+            narrative.push(`The dataset vectors for generation ${r.phase} present a tightly constrained cylindrical profile fold orientation configuration.`);
+        } else {
+            narrative.push(`The spatial dispersion profile for generation ${r.phase} traces an open geometric distribution pattern.`);
         }
-
-        function downloadTemplate() {
-            const text = "Station,Latitude,Longitude,Structure,Strike,Dip,Generation,Domain,Lithology,Younging\nST01,30.112,78.244,S0,225,45,,A,Quartzite,\nST02,30.114,78.246,FoldAxis,046,03,1,A,Quartzite,";
-            const blob = new Blob([text], {type: "text/csv"});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url; a.download = "Structural_Field_Template.csv"; a.click();
+        narrative.push(`The mathematical optimization processing registers a kinematic axis at ${MathEngine.formatTrendPlunge(r.beta)} (${MathEngine.getPlungeCharacter(r.beta.plunge)}).`);
+        
+        if (r.faMisfit !== null && r.faMisfit < 10) {
+            narrative.push(`The computed optimization projection establishes an excellent spatial match against outcropping structures (Misfit: ${r.faMisfit.toFixed(1)}°).`);
+        } else if (r.faMisfit !== null) {
+            narrative.push(`Calculated axial orientations cross-evaluate against measured surface attributes with a directional variance mismatch tracking at ${r.faMisfit.toFixed(1)}°.`);
         }
-
-        function openAllSectionsAndPrint() {
-            document.querySelectorAll('details.report-section').forEach(section => {
-                section.setAttribute('open', 'true');
-            });
-            setTimeout(() => { window.print(); }, 250);
+        if (r.bootstrap.ci95 < 8 && r.bootstrap.ci95 > 0) {
+            narrative.push(`Resampling bootstrap calculations highlight highly stable projection properties (95% Envelope Radius: ${r.bootstrap.ci95.toFixed(1)}°).`);
         }
+    }
+    document.getElementById('interpretationContainer').innerHTML = `<div class="interpretation-box">${narrative.join(" ")}</div>`;
 
-        const dropZone = document.getElementById('dropZone');
-        const fileInput = document.getElementById('fileInput');
+    // 12. Rule-Based Field Check Recommendation Engine
+    const recommendations = [];
+    if (structuralDB.linear.L1.length === 0) recommendations.push("<strong>Fieldwork Missing:</strong> Measure mineral stretching lineations (L1) to tie kinematic slip coordinates.");
+    if (structuralDB.foldAxis.FA1.length === 0) recommendations.push("<strong>Validation Gap:</strong> Direct map physical outcrop micro-fold hinge orientations (FA1) to confirm tensor beta modeling.");
+    if (structuralDB.planar.S2.length < 5) recommendations.push("<strong>Low Density Warning:</strong> Increase localized S2 cleavage measurement points to refine polyphase overlay limits.");
+    if (runtimeSummary.domains.length === 1) recommendations.push("<strong>Homogeneous Spatial Profile:</strong> Extend structural collection loops into adjacent domains to establish regional mapping consistency.");
+    
+    const chkBoxContainer = document.getElementById('checklistContainer');
+    chkBoxContainer.innerHTML = "";
+    if (recommendations.length === 0) recommendations.push("Baseline target data saturated. Spatial configuration complete.");
+    recommendations.forEach(m => { chkBoxContainer.innerHTML += `<div class="checklist-item"><input type="checkbox"><div>${m}</div></div>`; });
 
-        if (dropZone && fileInput) {
-            dropZone.addEventListener('dragover', (e) => { e.preventDefault(); });
-            dropZone.addEventListener('drop', (e) => {
-                e.preventDefault();
-                if(e.dataTransfer.files.length > 0) { handleFile(e.dataTransfer.files[0]); }
-            });
-            fileInput.addEventListener('change', (e) => {
-                if(e.target.files.length > 0) { handleFile(e.target.files[0]); }
-            });
-        }
+    // 13. Rule-Based Limitation Engine Analysis Panel
+    const limitations = [];
+    for (let pKey in analysisResults.global) {
+        let r = analysisResults.global[pKey];
+        if (r.faMean === null) limitations.push(`The calculated spatial β-axis projection for phase ${r.phase} has not been confirmed via physical outcrop structural logs.`);
+        if (r.bootstrap.ci95 > 20) limitations.push(`Deformation phase layer ${r.phase} displays high orientation variance. Bootstrap angular calculation limits are wide.`);
+    }
+    if (runtimeSummary.stations < 10) limitations.push(`Spatial tracking profile density remains localized (Count: ${runtimeSummary.stations} active stations).`);
 
-        function handleFile(file) {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                document.getElementById('csvInput').value = event.target.result;
-                executeSuite();
-            };
-            reader.readAsText(file);
-        }
+    let limHtml = `<ul style="padding-left:20px; font-size:13px;">`;
+    limitations.forEach(l => limHtml += `<li>${l}</li>`);
+    limHtml += `</ul><div class="caution-box"><strong>Domain Modeling Notice:</strong> Multi-domain calculations assume homogeneous planar characteristics inside explicit mapped sub-sectors.</div>`;
+    document.getElementById('limitationsContainer').innerHTML = limHtml;
+}
 
-        window.onload = () => { 
-            if (typeof executeSuite === "function") { executeSuite(); } 
-        };
-    </script>
+// ==========================================
+// 7. INTERFACE SUITE CONTROLLERS & ENGINE RUNNER
+// ==========================================
+function executeSuite() {
+    const pRes = InputLayer.parseCSV(document.getElementById('csvInput').value);
+    const logD = document.getElementById('qcLogs'); logD.innerHTML = "";
+    pRes.logs.forEach(l => { logD.innerHTML += `<div class="qc-item qc-${l.type ==='pass'?'pass':'warn'}">${l.msg}</div>`; });
+    
+    // Core Processing Execution Flow Routing
+    executeStructuralSynthesisPipeline();
+    
+    // Graphical Update Pipeline Layout Rendering
+    displayDatasetCounts();
+    VisualizationEngine.render();
+    
+    // Structural Reports Generator
+    buildStructuralReportingSuites();
+    
+    // Append Domain Processing Debug Tracer Banner
+    document.getElementById('polyphaseWarningContainer').innerHTML = `<div class="qc-item qc-pass"><strong>Dynamic Router Active:</strong> Mapped Data Domain Sub-Partitions: [${runtimeSummary.domains.join(", ")}].</div>`;
+}
+
+function toggleTextArea() { const c = document.getElementById('textareaContainer'); c.style.display = (c.style.display === 'block') ? 'none' : 'block'; }
+function toggleAdvancedSettings() { const e = document.getElementById('advancedContent'); e.style.display = (e.style.display === 'block') ? 'none' : 'block'; }
+function downloadTemplate() {
+    const blob = new Blob(["Station,Latitude,Longitude,Structure,Strike,Dip,Generation,Domain,Lithology,Younging\nST01,30.11,78.24,S0,225,45,1,A,Quartzite,"], {type: "text/csv"});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = "Structural_Field_Template.csv"; a.click();
+}
+function openAllSectionsAndPrint() { document.querySelectorAll('details.report-section').forEach(s => s.setAttribute('open', 'true')); setTimeout(() => { window.print(); }, 250); }
+
+const dz = document.getElementById('dropZone'), fi = document.getElementById('fileInput');
+if (dz && fi) {
+    dz.addEventListener('dragover', (e) => e.preventDefault());
+    dz.addEventListener('drop', (e) => { e.preventDefault(); if(e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]); });
+    fi.addEventListener('change', (e) => { if(e.target.files.length > 0) handleFile(e.target.files[0]); });
+}
+function handleFile(file) {
+    const r = new FileReader(); r.onload = (e) => { document.getElementById('csvInput').value = e.target.result; executeSuite(); }; r.readAsText(file);
+}
+window.onload = () => { executeSuite(); };
+</script>
 </body>
 </html>
