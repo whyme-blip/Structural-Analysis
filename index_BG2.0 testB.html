@@ -883,9 +883,41 @@ function displayDatasetCounts() {
     }
 }
 
- function getFabricInterpretation(fabricClass, stats = {}) {
-    const { lambda1 = null, lambda2 = null, lambda3 = null, woodcockK = null, woodcockC = null } = stats;
+function getFabricInterpretation(fabricClass, stats = {}) {
+    const { 
+        lambda1 = null, 
+        lambda2 = null, 
+        lambda3 = null, 
+        woodcockK = null, 
+        woodcockC = null,
+        rms = null,
+        suitability = null 
+    } = stats;
 
+    // 1. Compile Dynamic Parameter Notes
+    let notes = [];
+
+    if (woodcockK !== null && woodcockK < 0.2)
+        notes.push("Low Woodcock K indicates a strongly girdle-dominated fabric.");
+
+    if (woodcockK !== null && woodcockK > 5)
+        notes.push("High Woodcock K indicates a strongly clustered orientation fabric.");
+
+    if (rms !== null && rms < 5)
+        notes.push("Excellent cylindrical fit.");
+
+    if (rms >= 5 && rms < 12)
+        notes.push("Moderate cylindrical consistency.");
+
+    if (rms >= 12)
+        notes.push("High residual dispersion suggests non-cylindrical deformation.");
+
+    if (suitability !== null && suitability < 40)
+        notes.push("Dataset is unsuitable for reliable fold-axis estimation.");
+
+    const additionalNotesStr = notes.length > 0 ? notes.join(" ") : "Fabric parameters track within normal baseline variance limits.";
+
+    // 2. Select Fabric Core Content Profile
     switch (fabricClass) {
         case "Strong Point Cluster":
             return {
@@ -893,7 +925,8 @@ function displayDatasetCounts() {
                 interpretation: `The poles form a tightly concentrated orientation population with very little angular dispersion ($\\lambda_1$: ${lambda1?.toFixed(3)}). This pattern indicates a single, internally consistent planar fabric, such as a homogeneous regional foliation, cleavage or bedding attitude. The dataset lacks sufficient rotational variation to define a statistically meaningful fold axis.`,
                 geologicalMeaning: "Represents one dominant structural orientation rather than folded geometry.",
                 foldAxis: "Not calculated because no girdle geometry is present.",
-                recommendation: "Extend mapping across adjacent structural domains or fold limbs if fold geometry is expected."
+                recommendation: "Extend mapping across adjacent structural domains or fold limbs if fold geometry is expected.",
+                additionalNotes: additionalNotesStr
             };
 
         case "Weak Point Cluster":
@@ -902,7 +935,8 @@ function displayDatasetCounts() {
                 interpretation: `The poles remain concentrated but display slightly greater angular scatter than a strong point cluster. The dispersion (Shape $K$: ${woodcockK?.toFixed(2)}, Strength $C$: ${woodcockC?.toFixed(2)}) most likely reflects minor local variability, measurement uncertainty or gentle warping rather than systematic folding.`,
                 geologicalMeaning: "Single structural orientation with limited internal variation.",
                 foldAxis: "Fold axis calculation is not appropriate.",
-                recommendation: "Increase station density across the structural trend before attempting fold axis geometric analysis."
+                recommendation: "Increase station density across the structural trend before attempting fold axis geometric analysis.",
+                additionalNotes: additionalNotesStr
             };
 
         case "Point Cluster":
@@ -911,7 +945,8 @@ function displayDatasetCounts() {
                 interpretation: "The poles form a concentrated population indicating either a single structural limb or a homogeneous regional foliation. The dataset does not contain sufficient rotational dispersion to define a statistically meaningful fold axis.",
                 geologicalMeaning: "The structural fabric represents one dominant orientation rather than a folded surface.",
                 foldAxis: "$\\beta$-axis computation suppressed.",
-                recommendation: "Collect measurements across both fold limbs or additional structural domains."
+                recommendation: "Collect measurements across both fold limbs or additional structural domains.",
+                additionalNotes: additionalNotesStr
             };
 
         case "Pure Girdle":
@@ -922,7 +957,8 @@ function displayDatasetCounts() {
                 interpretation: `The poles define a continuous great-circle girdle ($I_g$: ${((lambda1 - lambda2)/(lambda1 - lambda3 || 1)).toFixed(2)}), indicating systematic rotation of planar surfaces around a common fold hinge. This geometry is highly characteristic of cylindrical folding loops.`,
                 geologicalMeaning: "The dataset contains sufficient rotational dispersion to confidently isolate a stable statistical $\\beta$-axis.",
                 foldAxis: "$\\beta$-axis calculated directly from the structural tensor orientation matrix.",
-                recommendation: "Compare the calculated $\\beta$-axis with mapped field hinges (FA) and associated linear kinematic fabrics (L)."
+                recommendation: "Compare the calculated $\\beta$-axis with mapped field hinges (FA) and associated linear kinematic fabrics (L).",
+                additionalNotes: additionalNotesStr
             };
 
         case "Bimodal Limb Pair":
@@ -931,7 +967,8 @@ function displayDatasetCounts() {
                 interpretation: "The dataset contains two distinct pole populations representing opposing fold limbs. Intermediate orientations are sparse or absent, suggesting under-sampling of the hinge zone rather than a continuous uniform girdle.",
                 geologicalMeaning: "Fold geometry is better represented by paired discrete limb orientations than by an eigenvalue-derived girdle.",
                 foldAxis: "$\\beta$-axis calculated using the geometric cross-product method.",
-                recommendation: "Map additional field stations across the hinge core zone to confirm cylindrical continuity."
+                recommendation: "Map additional field stations across the hinge core zone to confirm cylindrical continuity.",
+                additionalNotes: additionalNotesStr
             };
 
         case "Random Distribution":
@@ -941,7 +978,8 @@ function displayDatasetCounts() {
                 interpretation: `The poles are widely dispersed without any statistically significant preferred orientation ($C$: ${woodcockC?.toFixed(2)}). No coherent structural fabric is recognized within the imported measurements.`,
                 geologicalMeaning: "The dataset probably combines unrelated structural events, or contains random background tracking noise.",
                 foldAxis: "Not calculated.",
-                recommendation: "Partition the master dataset into localized structural sub-domains or spatial tracking windows before further analysis."
+                recommendation: "Partition the master dataset into localized structural sub-domains or spatial tracking windows before further analysis.",
+                additionalNotes: additionalNotesStr
             };
 
         case "Partial Girdle":
@@ -950,7 +988,8 @@ function displayDatasetCounts() {
                 interpretation: "The poles exhibit moderate rotational dispersion but do not form a complete great-circle distribution. This commonly reflects incomplete exposure of fold limbs or limited target sampling fields.",
                 geologicalMeaning: "Fold geometry may be present but remains incompletely constrained by the current mapping array.",
                 foldAxis: "$\\beta$-axis calculated with moderate structural confidence bounds.",
-                recommendation: "Collect additional measurement profiles directly through the expected hinge core region."
+                recommendation: "Collect additional measurement profiles directly through the expected hinge core region.",
+                additionalNotes: additionalNotesStr
             };
 
         case "Mixed Fabric":
@@ -959,7 +998,8 @@ function displayDatasetCounts() {
                 interpretation: "Multiple orientation populations are present simultaneously, suggesting structural overprinting, domain mixing or polyphase tectonic deformation zones.",
                 geologicalMeaning: "A single global orientation tensor solution does not adequately describe the structural dynamics of this dataset.",
                 foldAxis: "Interpret any auto-calculated trend variables with extreme caution.",
-                recommendation: "Separate the raw structural logs into discrete deformation phases or explicit spatial domains before final interpretation."
+                recommendation: "Separate the raw structural logs into discrete deformation phases or explicit spatial domains before final interpretation.",
+                additionalNotes: additionalNotesStr
             };
 
         default:
@@ -968,7 +1008,8 @@ function displayDatasetCounts() {
                 interpretation: "No predefined geological interpretation is available for this structural configuration layer.",
                 geologicalMeaning: "Review the structural dataset manually using stereonet pole projections.",
                 foldAxis: "No automatic calculation or recommendation.",
-                recommendation: "Inspect stereonet point distribution density graphs and spatial tracking metadata."
+                recommendation: "Inspect stereonet point distribution density graphs and spatial tracking metadata.",
+                additionalNotes: additionalNotesStr
             };
     }
 }   
