@@ -743,7 +743,8 @@ function analysePlanarGeneration(phaseNumber, phaseDataInstance) {
     let sSpatial = Math.min(1.0, (runtimeSummary.stations / 10) * 0.5 + (planes.length / 15) * 0.5);
     
     // 3. RMS Residual Weight (20%) - Penalty scales with deviation from perfect cylindricity
-    let sRMS = Math.max(0.0, 1.0 - (rms / 15)); 
+    const uiRmsLimit = parseFloat(document.getElementById('rmsThreshold')?.value) || 15;    
+    let sRMS = Math.max(0.0, 1.0 - (rms / uiRmsLimit)); 
     
     // 4. Bootstrap Confidence Weight (15%) - Narrower 95% CI yields higher reliability
     let sBootstrap = bootstrap.ci95 > 0 ? Math.max(0.0, 1.0 - (bootstrap.ci95 / 20)) : 0.0;
@@ -1029,18 +1030,23 @@ function buildStructuralReportingSuites() {
     for (let pKey in analysisResults.global) {
         let r = analysisResults.global[pKey];
         
-        // Extract structural eigenvalues
-        let l1 = r.eigen.values[0];
-        let l2 = r.eigen.values[1];
-        let l3 = Math.max(1e-5, r.eigen.values[2]); // Protect against division by zero
-        let protectedL2 = Math.max(1e-5, l2);
+// Extract structural eigenvalues
+        let l1 = Math.max(1e-5, r.eigen.values[0]);
+        let l2 = Math.max(1e-5, r.eigen.values[1]);
+        let l3 = Math.max(1e-5, r.eigen.values[2]); // Protect against division by zero & negative logs
 
         // Calculate Woodcock (1977) parameters explicitly for the publication table view
-        let woodcockC = Math.log(l1 / l3);
-        let woodcockK = Math.log(l1 / protectedL2) / (Math.log(protectedL2 / l3) || 1e-5);
+        // Ensure natural log arguments are >= 1 to maintain positive physical space
+        let woodcockC = Math.log(Math.max(1.0, l1 / l3));
+        
+        let woodcockK_Num = Math.log(Math.max(1.0, l1 / l2));
+        let woodcockK_Den = Math.log(Math.max(1.0, l2 / l3));
+        // Avoid 0 / 0 or division by microscopic noise; default to 0 (or 1 depending on preferred isometric state)
+        let woodcockK = (woodcockK_Den > 1e-5) ? (woodcockK_Num / woodcockK_Den) : 0.0;
         
         // Girdle index variation (normalized relative concentration between intermediate axes)
-        let girdleIndex = (l1 - l2) / (l1 - l3 || 1e-5);
+        let girdleDen = l1 - l3;
+        let girdleIndex = (girdleDen > 1e-5) ? ((l1 - l2) / girdleDen) : 0.0;
 
         // Extract raw data segment to compute Resultant Vector Length (R)
         let phaseIndex = parseInt(pKey.replace('F', ''));
@@ -1070,16 +1076,18 @@ function buildStructuralReportingSuites() {
             fabricType = (girdleIndex > 0.7) ? "Girdle / Planar Trend" : "Partial Girdle";
         }
 
-        // 2. Fetch the "Why" Interpretation Payload
+       // 2. Fetch the "Why" Interpretation Payload with updated runtime flags passed down
         let geoExplanation = getFabricInterpretation(fabricType, {
             lambda1: l1,
             lambda2: l2,
             lambda3: l3,
             woodcockK: woodcockK,
-            woodcockC: woodcockC
+            woodcockC: woodcockC,
+            rms: r.rms,
+            suitability: r.reliability
         });
-
-        // 3. Render Publication-Quality Tensor Shape Table with Embedded Dynamic Explanations
+        
+       // 3. Render Publication-Quality Tensor Shape Table with Embedded Dynamic Explanations
         tC.innerHTML += `
         <div style="font-size:13px; font-weight:700; margin-top:12px; color:#1e293b;">
             ${r.phase} Fabrication Shape Matrix
@@ -1102,7 +1110,8 @@ function buildStructuralReportingSuites() {
         <div style="background:#f1f5f9; border-left:3px solid #0284c7; padding:10px; font-size:11px; color:#334155; margin-bottom:20px; line-height:1.4;">
             <strong>Structural Analysis:</strong> ${geoExplanation.interpretation}<br>
             <span style="display:block; margin-top:4px;"><strong>Geological Significance:</strong> ${geoExplanation.geologicalMeaning}</span>
-            <span style="display:block; margin-top:2px; color:#0369a1;"><strong>Target Action:</strong> ${geoExplanation.recommendation}</span>
+            <span style="display:block; margin-top:2px;"><strong>Calculated Confidence Flags:</strong> <span style="color:#b91c1c; font-weight:600;">${geoExplanation.additionalNotes}</span></span>
+            <span style="display:block; margin-top:4px; color:#0369a1;"><strong>Target Action:</strong> ${geoExplanation.recommendation}</span>
         </div>`;
         
         // 2. Render Corresponding Kinematic Beta Calculation Table
