@@ -883,6 +883,95 @@ function displayDatasetCounts() {
     }
 }
 
+ function getFabricInterpretation(fabricClass, stats = {}) {
+    const { lambda1 = null, lambda2 = null, lambda3 = null, woodcockK = null, woodcockC = null } = stats;
+
+    switch (fabricClass) {
+        case "Strong Point Cluster":
+            return {
+                title: "Strong Point Cluster",
+                interpretation: `The poles form a tightly concentrated orientation population with very little angular dispersion ($\\lambda_1$: ${lambda1?.toFixed(3)}). This pattern indicates a single, internally consistent planar fabric, such as a homogeneous regional foliation, cleavage or bedding attitude. The dataset lacks sufficient rotational variation to define a statistically meaningful fold axis.`,
+                geologicalMeaning: "Represents one dominant structural orientation rather than folded geometry.",
+                foldAxis: "Not calculated because no girdle geometry is present.",
+                recommendation: "Extend mapping across adjacent structural domains or fold limbs if fold geometry is expected."
+            };
+
+        case "Weak Point Cluster":
+            return {
+                title: "Weak Point Cluster",
+                interpretation: `The poles remain concentrated but display slightly greater angular scatter than a strong point cluster. The dispersion (Shape $K$: ${woodcockK?.toFixed(2)}, Strength $C$: ${woodcockC?.toFixed(2)}) most likely reflects minor local variability, measurement uncertainty or gentle warping rather than systematic folding.`,
+                geologicalMeaning: "Single structural orientation with limited internal variation.",
+                foldAxis: "Fold axis calculation is not appropriate.",
+                recommendation: "Increase station density across the structural trend before attempting fold axis geometric analysis."
+            };
+
+        case "Point Cluster":
+            return {
+                title: "Point Cluster",
+                interpretation: "The poles form a concentrated population indicating either a single structural limb or a homogeneous regional foliation. The dataset does not contain sufficient rotational dispersion to define a statistically meaningful fold axis.",
+                geologicalMeaning: "The structural fabric represents one dominant orientation rather than a folded surface.",
+                foldAxis: "$\\beta$-axis computation suppressed.",
+                recommendation: "Collect measurements across both fold limbs or additional structural domains."
+            };
+
+        case "Pure Girdle":
+        case "Girdle Distribution":
+        case "Girdle / Planar Trend":
+            return {
+                title: "Cylindrical Girdle Distribution",
+                interpretation: `The poles define a continuous great-circle girdle ($I_g$: ${((lambda1 - lambda2)/(lambda1 - lambda3 || 1)).toFixed(2)}), indicating systematic rotation of planar surfaces around a common fold hinge. This geometry is highly characteristic of cylindrical folding loops.`,
+                geologicalMeaning: "The dataset contains sufficient rotational dispersion to confidently isolate a stable statistical $\\beta$-axis.",
+                foldAxis: "$\\beta$-axis calculated directly from the structural tensor orientation matrix.",
+                recommendation: "Compare the calculated $\\beta$-axis with mapped field hinges (FA) and associated linear kinematic fabrics (L)."
+            };
+
+        case "Bimodal Limb Pair":
+            return {
+                title: "Bimodal Limb Pair",
+                interpretation: "The dataset contains two distinct pole populations representing opposing fold limbs. Intermediate orientations are sparse or absent, suggesting under-sampling of the hinge zone rather than a continuous uniform girdle.",
+                geologicalMeaning: "Fold geometry is better represented by paired discrete limb orientations than by an eigenvalue-derived girdle.",
+                foldAxis: "$\\beta$-axis calculated using the geometric cross-product method.",
+                recommendation: "Map additional field stations across the hinge core zone to confirm cylindrical continuity."
+            };
+
+        case "Random Distribution":
+        case "Random Spread":
+            return {
+                title: "Random/Isotropic Distribution",
+                interpretation: `The poles are widely dispersed without any statistically significant preferred orientation ($C$: ${woodcockC?.toFixed(2)}). No coherent structural fabric is recognized within the imported measurements.`,
+                geologicalMeaning: "The dataset probably combines unrelated structural events, or contains random background tracking noise.",
+                foldAxis: "Not calculated.",
+                recommendation: "Partition the master dataset into localized structural sub-domains or spatial tracking windows before further analysis."
+            };
+
+        case "Partial Girdle":
+            return {
+                title: "Partial Girdle",
+                interpretation: "The poles exhibit moderate rotational dispersion but do not form a complete great-circle distribution. This commonly reflects incomplete exposure of fold limbs or limited target sampling fields.",
+                geologicalMeaning: "Fold geometry may be present but remains incompletely constrained by the current mapping array.",
+                foldAxis: "$\\beta$-axis calculated with moderate structural confidence bounds.",
+                recommendation: "Collect additional measurement profiles directly through the expected hinge core region."
+            };
+
+        case "Mixed Fabric":
+            return {
+                title: "Mixed Fabric/Overprint",
+                interpretation: "Multiple orientation populations are present simultaneously, suggesting structural overprinting, domain mixing or polyphase tectonic deformation zones.",
+                geologicalMeaning: "A single global orientation tensor solution does not adequately describe the structural dynamics of this dataset.",
+                foldAxis: "Interpret any auto-calculated trend variables with extreme caution.",
+                recommendation: "Separate the raw structural logs into discrete deformation phases or explicit spatial domains before final interpretation."
+            };
+
+        default:
+            return {
+                title: fabricClass,
+                interpretation: "No predefined geological interpretation is available for this structural configuration layer.",
+                geologicalMeaning: "Review the structural dataset manually using stereonet pole projections.",
+                foldAxis: "No automatic calculation or recommendation.",
+                recommendation: "Inspect stereonet point distribution density graphs and spatial tracking metadata."
+            };
+    }
+}   
 // ==========================================
 // 5. NARRATIVE GENERATION & REPORT COMPILER
 // ==========================================
@@ -923,20 +1012,38 @@ function buildStructuralReportingSuites() {
             rLength = Math.sqrt(rx*rx + ry*ry + rz*rz);
         }
 
-        // Determine descriptive fabric classification text
+// =========================================================================
+        // ADVANCED FABRIC MATRIX & STRUCTURAL INTERPRETATION BUILDER
+        // =========================================================================
+        
+        // 1. Refined Multi-Tier Fabric Classification Logic
         let fabricType = "Random Spread";
-        if (woodcockC >= 0.4) {
-            if (woodcockK > 2.0) fabricType = "Point Cluster";
-            else if (woodcockK < 0.5) fabricType = "Pure Girdle";
-            else fabricType = "Girdle / Planar Trend";
+        if (woodcockC < 0.4) {
+            fabricType = "Random Spread";
+        } else if (woodcockK > 2.0) {
+            fabricType = woodcockC > 1.5 ? "Strong Point Cluster" : "Point Cluster";
+        } else if (woodcockK < 0.4) {
+            fabricType = "Pure Girdle";
+        } else if (woodcockK >= 0.4 && woodcockK <= 2.0) {
+            // Check for potential bimodal limb segregation vs continuous dispersion
+            fabricType = (girdleIndex > 0.7) ? "Girdle / Planar Trend" : "Partial Girdle";
         }
 
-        // 1. Render Publication-Quality Tensor Shape Table
+        // 2. Fetch the "Why" Interpretation Payload
+        let geoExplanation = getFabricInterpretation(fabricType, {
+            lambda1: l1,
+            lambda2: l2,
+            lambda3: l3,
+            woodcockK: woodcockK,
+            woodcockC: woodcockC
+        });
+
+        // 3. Render Publication-Quality Tensor Shape Table with Embedded Dynamic Explanations
         tC.innerHTML += `
         <div style="font-size:13px; font-weight:700; margin-top:12px; color:#1e293b;">
             ${r.phase} Fabrication Shape Matrix
         </div>
-        <table style="width:100%; border-collapse:collapse; margin-bottom:15px; font-size:12px;">
+        <table style="width:100%; border-collapse:collapse; margin-bottom:8px; font-size:12px;">
             <tr><th>$\\lambda_1$ (Dominant Axis)</th><td>${l1.toFixed(4)}</td></tr>
             <tr><th>$\\lambda_2$ (Intermediate Axis)</th><td>${l2.toFixed(4)}</td></tr>
             <tr><th>$\\lambda_3$ (Minor Axis)</th><td>${l3.toFixed(4)}</td></tr>
@@ -944,8 +1051,18 @@ function buildStructuralReportingSuites() {
             <tr><th>Woodcock C (Strength)</th><td>${woodcockC.toFixed(3)}</td></tr>
             <tr><th>Girdle Index ($I_g$)</th><td>${girdleIndex.toFixed(3)}</td></tr>
             <tr><th>Resultant Vector Length ($R$)</th><td>${rLength.toFixed(2)} ($n=${targetPlanes.length}$)</td></tr>
-            <tr style="background:#f8fafc; font-weight:bold;"><th>Fabric Classification</th><td>${fabricType}</td></tr>
-        </table>`;
+            <tr style="background:#f8fafc; font-weight:bold; color:#0f172a;">
+                <th>Fabric Classification</th>
+                <td>${geoExplanation.title}</td>
+            </tr>
+        </table>
+        
+        <!-- Publication Explanatory Box: Explaining WHY the data looks like this -->
+        <div style="background:#f1f5f9; border-left:3px solid #0284c7; padding:10px; font-size:11px; color:#334155; margin-bottom:20px; line-height:1.4;">
+            <strong>Structural Analysis:</strong> ${geoExplanation.interpretation}<br>
+            <span style="display:block; margin-top:4px;"><strong>Geological Significance:</strong> ${geoExplanation.geologicalMeaning}</span>
+            <span style="display:block; margin-top:2px; color:#0369a1;"><strong>Target Action:</strong> ${geoExplanation.recommendation}</span>
+        </div>`;
         
         // 2. Render Corresponding Kinematic Beta Calculation Table
         let betaStr = r.beta ? MathEngine.formatTrendPlunge(r.beta) : `<span style="color:#dc2626; font-weight:700;">No Beta (Cluster/Random)</span>`;
@@ -962,6 +1079,7 @@ function buildStructuralReportingSuites() {
             <tr><th>Fisher Dispersion ($k$)</th><td>${r.fisher.k.toFixed(1)}</td></tr>
         </table>`;
     }
+
     // Main Summary Card Component Guards
     if (mainReport.beta) {
         document.getElementById('card-trend-plunge').innerHTML = `Trend: ${Math.round(mainReport.beta.trend).toString().padStart(3,'0')}°<br>Plunge: ${Math.round(mainReport.beta.plunge).toString().padStart(2,'0')}°`;
@@ -979,6 +1097,8 @@ function buildStructuralReportingSuites() {
     document.getElementById('conf-overall').innerText = `${mainReport.reliability}%`;
     document.getElementById('conf-stars').innerText = mainReport.reliability >= 75 ? "★★★★★" : "★★★☆☆";
     document.getElementById('conf-verification').innerText = `Verification markers: ${mainReport.evidence.join(', ')}`;
+
+    // Render Summary Correlation Table Matrix
     let tbl = `<div style="font-size:13px; font-weight:700; margin-top:10px;">Phase Correlation Evaluation Summary Matrix ($\\beta_n \\rightarrow \\text{FA}_n \\rightarrow \\text{L}_n$)</div>
     <table>
         <thead>
@@ -1002,7 +1122,7 @@ function buildStructuralReportingSuites() {
         
         tbl += `<tr>
             <td><strong>${r.phase}</strong></td>
-            <td>${MathEngine.formatTrendPlunge(r.beta)}</td>
+            <td>${r.beta ? MathEngine.formatTrendPlunge(r.beta) : "N/A"}</td>
             <td>${faStr} (${r.measuredFA})</td>
             <td><span class="badge">${faDev} (${r.faCorrelation})</span></td>
             <td>${lStr} (${r.measuredL})</td>
@@ -1011,30 +1131,23 @@ function buildStructuralReportingSuites() {
     }
     document.getElementById('correlationContainer').innerHTML = tbl + "</tbody></table>";
 
-    // ==========================================
-    // FOUR-PARAGRAPH GEOLOGICAL REPORT COMPILER
-    // ==========================================
+    // Four-Paragraph Narrative Document Builder
     const narrativeHtml = [];
-    
     for (let pKey in analysisResults.global) {
         let r = analysisResults.global[pKey];
         
-        // Paragraph 1: Dataset Summary
         let p1_Summary = `<strong>Dataset Summary (${r.phase}):</strong> Structural synthesis processing evaluated ${r.dataCount} planar features mapped across ${runtimeSummary.stations} active field stations within a lithological framework dominated by ${runtimeSummary.lithologies.join(', ')}. Data controls establish a localized spatial profile with an overall calculated confidence profile marking at ${r.reliability}%.`;
 
-        // Paragraph 2: Fabric Analysis
         let faStr = r.faMean ? MathEngine.formatTrendPlunge(r.faMean) : "absent";
         let lStr = r.lMean ? MathEngine.formatTrendPlunge(r.lMean) : "absent";
-        let p2_Fabric = `<strong>Fabric Analysis:</strong> Planar orientation distributions exhibit a cylindricity profile tracking at ${r.cylindricity}% with a mean geometric dispersion tensor eigenvalue of ${r.eigen.values[0].toFixed(2)}. Field inventory records matching mesoscopic indicators note measured hinge targets (${r.measuredFA}) averaging ${faStr}, alongside co-eval linear kinematic lineations (${r.measuredL}) yielding a spatial mean of ${lStr}.`;
+        let p2_Fabric = `<strong>Fabric Analysis:</strong> Planar orientation distributions exhibit a cylindricity profile tracking at ${r.beta ? r.cylindricity + '%' : 'N/A'} with a mean geometric dispersion tensor eigenvalue of ${r.eigen.values[0].toFixed(2)}. Field inventory records matching mesoscopic indicators note measured hinge targets (${r.measuredFA}) averaging ${faStr}, alongside co-eval linear kinematic lineations (${r.measuredL}) yielding a spatial mean of ${lStr}.`;
 
-        // Paragraph 3: Structural Interpretation
-        let p3_Interpretation = `<strong>Structural Interpretation:</strong> The mathematical optimization vectors isolate a regional kinematic fold axis ($\\beta$-axis) tracking at ${MathEngine.formatTrendPlunge(r.beta)}, characterized as a ${MathEngine.getPlungeCharacter(r.beta.plunge)}. Cross-evaluation confirms an "${r.faCorrelation}" geometric correlation match against physical outcropping fabrics (Hinge Misfit: ${r.faMisfit !== null ? r.faMisfit.toFixed(1) + '°' : 'N/A'}), indicating structural continuity across the generation profile.`;
+        let bStr = r.beta ? MathEngine.formatTrendPlunge(r.beta) : "N/A";
+        let p3_Interpretation = `<strong>Structural Interpretation:</strong> The mathematical optimization vectors isolate a regional kinematic fold axis ($\\beta$-axis) tracking at ${bStr}, characterized as a ${r.beta ? MathEngine.getPlungeCharacter(r.beta.plunge) : 'Non-cylindrical system'}. Cross-evaluation confirms an "${r.faCorrelation}" geometric correlation match against physical outcropping fabrics (Hinge Misfit: ${r.faMisfit !== null ? r.faMisfit.toFixed(1) + '°' : 'N/A'}), indicating structural continuity across the generation profile.`;
 
-        // Paragraph 4: Limitations & Quality Controls
-        let bootStr = r.bootstrap.ci95 > 0 ? `Resampling bootstrap constraints present a 95% confidence envelope radius of ±${r.bootstrap.ci95.toFixed(1)}°.` : "Bootstrap resampling window requires supplementary verification arrays.";
+        let bootStr = (r.beta && r.bootstrap.ci95 > 0) ? `Resampling bootstrap constraints present a 95% confidence envelope radius of ±${r.bootstrap.ci95.toFixed(1)}°.` : "Bootstrap resampling window requires supplementary verification arrays.";
         let p4_Limitations = `<strong>Limitations & Quality Controls:</strong> Vector stability scales directly with localized structural variance tracking an RMS residual error of ${r.rms.toFixed(2)}°. ${bootStr} Any cross-domain extrapolations assume mechanical and spatial homogeneity inside explicit sub-sectors; lack of physical verification controls across sparse sectors may shift spatial boundaries.`;
 
-        // Combine paragraphs into HTML structures
         narrativeHtml.push(`
             <div class="interpretation-section" style="margin-bottom: 20px;">
                 <h4>Structural Synthesis Profiling — Generation Layer ${r.phase}</h4>
@@ -1046,9 +1159,9 @@ function buildStructuralReportingSuites() {
             <hr style="border: 0; border-top: 1px dashed #cbd5e1; margin: 20px 0;" />
         `);
     }
-    
     document.getElementById('interpretationContainer').innerHTML = `<div class="interpretation-box">${narrativeHtml.join("")}</div>`;
 
+    // Recommendations Checklists & Map Controls Tracker
     const recommendations = [];
     let totalL = 0, totalFA = 0;
     for(let p=1; p<=3; p++) { totalL += structuralDB.phases[p].linear.length; totalFA += structuralDB.phases[p].foldAxis.length; }
@@ -1062,11 +1175,13 @@ function buildStructuralReportingSuites() {
     if (recommendations.length === 0) recommendations.push("Baseline target data saturated. Spatial configuration complete.");
     recommendations.forEach(m => { chkBoxContainer.innerHTML += `<div class="checklist-item"><input type="checkbox"><div>${m}</div></div>`; });
 
+    // Output Field Limitations Summary Notes
     const limitations = [];
     for (let pKey in analysisResults.global) {
         let r = analysisResults.global[pKey];
-        if (r.faMean === null) limitations.push(`The calculated spatial β-axis projection for phase ${r.phase} has not been confirmed via physical outcrop structural logs.`);
-        if (r.bootstrap.ci95 > 20) limitations.push(`Deformation phase layer ${r.phase} displays high orientation variance. Bootstrap angular calculation limits are wide.`);
+        if (!r.beta) limitations.push(`Layer ${r.phase} point cluster/scatter configuration prevents unique fold axis ($\\beta$-axis) extraction.`);
+        if (r.faMean === null) limitations.push(`The calculated spatial $\\beta$-axis projection for phase ${r.phase} has not been confirmed via physical outcrop structural logs.`);
+        if (r.beta && r.bootstrap.ci95 > 20) limitations.push(`Deformation phase layer ${r.phase} displays high orientation variance. Bootstrap angular calculation limits are wide.`);
     }
     if (runtimeSummary.stations < 10) limitations.push(`Spatial tracking profile density remains localized (Count: ${runtimeSummary.stations} active stations).`);
 
@@ -1075,7 +1190,7 @@ function buildStructuralReportingSuites() {
     limHtml += `</ul><div class="caution-box"><strong>Domain Modeling Notice:</strong> Multi-domain calculations assume homogeneous planar characteristics inside explicit mapped sub-sectors.</div>`;
     document.getElementById('limitationsContainer').innerHTML = limHtml;
 }
-
+    
 // ==========================================
 // 6. PIPELINE WORKSPACE RUNTIME EXECUTION
 // ==========================================
