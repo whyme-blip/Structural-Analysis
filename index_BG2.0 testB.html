@@ -1094,43 +1094,30 @@ try {
     if (!primaryKey && Object.keys(analysisResults.global).length > 0) primaryKey = Object.keys(analysisResults.global)[0];
     
     if (!primaryKey || !analysisResults.global[primaryKey]) {
-        // Fallback UI rendering so the app doesn't freeze blank
         document.getElementById('card-trend-plunge').innerHTML = `<span style="color:var(--warning)">Insufficient Data</span>`;
         document.getElementById('conf-overall').innerText = "0%";
         return;
     }
     let mainReport = analysisResults.global[primaryKey];
 
+    // --- PIPELINE DECOUPLING STAGE 1: COMPILING THE REPORT OBJECT MODELS ---
+    const dataInterpretationModels = [];
+
     for (const pKey in analysisResults.global) {
         const r = analysisResults.global[pKey];
         if (!r || !r.eigen) continue;
         
-        // Extract structural eigenvalues
         const eig1 = r.eigen?.values?.[0];
-        const eigText = eig1 != null ? eig1.toFixed(2) : "N/A";
-
         let l1 = Math.max(1e-5, eig1 ?? 0);
         let l2 = Math.max(1e-5, r.eigen?.values?.[1] ?? 0);
-        let l3 = Math.max(1e-5, r.eigen?.values?.[2] ?? 0); // Protect against division by zero & negative logs
+        let l3 = Math.max(1e-5, r.eigen?.values?.[2] ?? 0);
 
-        // Safe fallback evaluation of bootstrap confidence intervals
-        const ci95 = r.bootstrap?.ci95 ?? null;
-        let bootStr = (r.beta && ci95 !== null && ci95 > 0) ? `${ci95.toFixed(1)}°` : "N/A";
-        
-        // Format calculated axis safely
-        const betaText = r.beta ? MathEngine.formatTrendPlunge(r.beta) : "Not Calculated";
-        // Calculate Woodcock (1977) parameters explicitly for the publication table view
         let woodcockC = Math.log(Math.max(1.0, l1 / l3));
-        
         let woodcockK_Num = Math.log(Math.max(1.0, l1 / l2));
         let woodcockK_Den = Math.log(Math.max(1.0, l2 / l3));
         let woodcockK = (woodcockK_Den > 1e-5) ? (woodcockK_Num / woodcockK_Den) : 0.0;
-        
-        // Girdle index variation
-        let girdleDen = l1 - l3;
-        let girdleIndex = (girdleDen > 1e-5) ? ((l1 - l2) / girdleDen) : 0.0;
+        let girdleIndex = (l1 - l3 > 1e-5) ? ((l1 - l2) / (l1 - l3)) : 0.0;
 
-        // Extract raw data segment to compute Resultant Vector Length (R)
         let phaseIndex = parseInt(pKey.replace('F', ''));
         let targetPlanes = structuralDB.phases[phaseIndex]?.planar || [];
         
@@ -1141,7 +1128,6 @@ try {
             rLength = Math.sqrt(rx*rx + ry*ry + rz*rz);
         }
 
-        // 1. Refined Multi-Tier Fabric Classification Logic
         let fabricType = "Random Fabric Distribution";
         if (woodcockC < 0.4) {
             fabricType = "Random Fabric Distribution";
@@ -1153,35 +1139,42 @@ try {
             fabricType = "Girdle / Planar Trend";
         }
 
-        // 2. Fetch the Interpretation Payload
         let geoExplanation = getFabricInterpretation(fabricType, {
-            lambda1: l1,
-            lambda2: l2,
-            lambda3: l3,
-            woodcockK: woodcockK,
-            woodcockC: woodcockC,
-            rms: r.rms,
-            suitability: r.reliability
+            lambda1: l1, lambda2: l2, lambda3: l3,
+            woodcockK: woodcockK, woodcockC: woodcockC,
+            rms: r.rms, suitability: r.reliability
         });
-        
-        // 3. Render Publication-Quality Tensor Shape Table
+
+        // Store clean processed statistical models detached from presentation layers
+        dataInterpretationModels.push({
+            phaseName: r.phase,
+            l1, l2, l3,
+            woodcockK, woodcockC, girdleIndex, rLength,
+            sampleCount: targetPlanes.length,
+            classificationTitle: geoExplanation.title
+        });
+    }
+
+    // --- PIPELINE DECOUPLING STAGE 2: PURE HTML RENDERER ENGINE ---
+    dataInterpretationModels.forEach(model => {
         tC.innerHTML += `
         <div style="font-size:13px; font-weight:700; margin-top:12px; color:#1e293b;">
-            ${r.phase} Orientation Tensor Statistics
+            ${model.phaseName} Orientation Tensor Statistics
         </div>
         <table style="width:100%; border-collapse:collapse; margin-bottom:8px; font-size:12px;">
-            <tr><th>&lambda;₁ (Dominant Axis)</th><td>${l1.toFixed(4)}</td></tr>
-            <tr><th>&lambda;₂ (Intermediate Axis)</th><td>${l2.toFixed(4)}</td></tr>
-            <tr><th>&lambda;₃ (Minor Axis)</th><td>${l3.toFixed(4)}</td></tr>
-            <tr style="border-top:1px dashed #cbd5e1;"><th>Woodcock K (Shape)</th><td>${woodcockK.toFixed(3)}</td></tr>
-            <tr><th>Woodcock C (Strength)</th><td>${woodcockC.toFixed(3)}</td></tr>
-            <tr><th>Girdle Index (Ig)</th><td>${girdleIndex.toFixed(3)}</td></tr>
-            <tr><th>Resultant Vector Length (R)</th><td>${rLength.toFixed(2)} (n=${targetPlanes.length})</td></tr>
+            <tr><th>&lambda;₁ (Dominant Axis)</th><td>${model.l1.toFixed(4)}</td></tr>
+            <tr><th>&lambda;₂ (Intermediate Axis)</th><td>${model.l2.toFixed(4)}</td></tr>
+            <tr><th>&lambda;₃ (Minor Axis)</th><td>${model.l3.toFixed(4)}</td></tr>
+            <tr style="border-top:1px dashed #cbd5e1;"><th>Woodcock K (Shape)</th><td>${model.woodcockK.toFixed(3)}</td></tr>
+            <tr><th>Woodcock C (Strength)</th><td>${model.woodcockC.toFixed(3)}</td></tr>
+            <tr><th>Girdle Index (Ig)</th><td>${model.girdleIndex.toFixed(3)}</td></tr>
+            <tr><th>Resultant Vector Length (R)</th><td>${model.rLength.toFixed(2)} (n=${model.sampleCount})</td></tr>
             <tr style="background:#f8fafc; font-weight:bold; color:#0f172a;">
                 <th>Fabric Classification</th>
-                <td>${geoExplanation.title}</td>
+                <td>${model.classificationTitle}</td>
             </tr>
-        </table>
+        </table>`;
+    });
         
         <div style="background:#f1f5f9; border-left:3px solid #0284c7; padding:10px; font-size:11px; color:#334155; margin-bottom:20px; line-height:1.4;">
             <strong>Structural Analysis:</strong> ${geoExplanation.interpretation}<br>
@@ -1257,73 +1250,260 @@ try {
     document.getElementById('correlationContainer').innerHTML = tbl + "</tbody></table>";
 
     // Four-Paragraph Narrative Document Builder
-    const narrativeHtml = [];
-    for (let pKey in analysisResults.global) {
-        let r = analysisResults.global[pKey];
-        
-        let p1_Summary = `<strong>Dataset Summary (${r.phase}):</strong> Structural synthesis processing evaluated ${r.dataCount || 0} features mapped across ${runtimeSummary.stations || 0} active field stations within a lithological framework. Data controls establish a localized spatial profile with an overall calculated confidence profile marking at ${r.reliability || 0}%.`;
-
-        let faStr = r.faMean ? MathEngine.formatTrendPlunge(r.faMean) : "absent";
-        let lStr = r.lMean ? MathEngine.formatTrendPlunge(r.lMean) : "absent";
-        let p2_Fabric = `<strong>Fabric Analysis:</strong> Planar orientation distributions exhibit a cylindricity profile tracking at ${r.beta ? r.cylindricity + '%' : 'N/A'} with a mean geometric dispersion tensor eigenvalue of ${l1.toFixed(2)}. Field inventory records matching mesoscopic indicators note measured hinge targets (${r.measuredFA}) averaging ${faStr}, alongside co-eval linear kinematic lineations (${r.measuredL}) yielding a spatial mean of ${lStr}.`;
-
-        let bStr = r.beta ? MathEngine.formatTrendPlunge(r.beta) : "N/A";
-        let characterStr = (r.beta && r.beta.plunge !== undefined) ? MathEngine.getPlungeCharacter(r.beta.plunge) : 'Non-cylindrical system';
-        let misfitStr = (r.faMisfit !== null && r.faMisfit !== undefined) ? r.faMisfit.toFixed(1) + '°' : 'N/A';
-        
-        let p3_Interpretation = `<strong>Structural Interpretation:</strong> The mathematical optimization vectors isolate a regional kinematic fold axis (beta-axis) tracking at ${bStr}, characterized as a ${characterStr}. Cross-evaluation confirms an "${r.faCorrelation || 'Unclassified'}" geometric correlation match against physical outcropping fabrics (Hinge Misfit: ${misfitStr}), indicating structural continuity across the generation profile.`;
-        
-        let bootStr = (r.beta && r.bootstrap && r.bootstrap.ci95 > 0) ? `Resampling bootstrap constraints present a 95% confidence envelope radius of ±${r.bootstrap.ci95.toFixed(1)}°.` : "Bootstrap resampling window requires supplementary verification arrays.";
-        
-        let safeRms = (r.rms !== undefined && r.rms !== null) ? r.rms.toFixed(2) : "0.00";
-        let p4_Limitations = `<strong>Limitations & Quality Controls:</strong> Vector stability scales directly with localized structural variance tracking an RMS residual error of ${safeRms}°: ${bootStr} Any cross-domain extrapolations assume mechanical and spatial homogeneity inside explicit sub-sectors; lack of physical verification controls across sparse sectors may shift spatial boundaries.`;
-
-        narrativeHtml.push(`
-            <div class="interpretation-section" style="margin-bottom: 20px;">
-                <h4>Structural Synthesis Profiling — Generation Layer ${r.phase}</h4>
-                <p style="margin-bottom: 10px; text-align: justify;">${p1_Summary}</p>
-                <p style="margin-bottom: 10px; text-align: justify;">${p2_Fabric}</p>
-                <p style="margin-bottom: 10px; text-align: justify;">${p3_Interpretation}</p>
-                <p style="margin-bottom: 10px; text-align: justify; color: #475569; font-style: italic;">${p4_Limitations}</p>
-            </div>
-            <hr style="border: 0; border-top: 1px dashed #cbd5e1; margin: 20px 0;" />
-        `);
-    }
-    document.getElementById('interpretationContainer').innerHTML = `<div class="interpretation-box">${narrativeHtml.join("")}</div>`;
-
-    // Recommendations Checklists & Map Controls Tracker
-    let recommendations = [];
-    let totalL = 0, totalFA = 0;
     
-    // Fallback checks to safely count elements across active DB structures
-    for (let p in structuralDB.phases) {
-        let phaseObj = structuralDB.phases[p];
-        if (phaseObj) {
-            if (phaseObj.linear) totalL += phaseObj.linear.length;
-            if (phaseObj.foldAxis) totalFA += phaseObj.foldAxis.length;
+    // =================================================================
+    // TIER 2: NARRATIVE BUILDER (Generates pure text content strings)
+    // =================================================================
+    const narrativeProseModels = dataInterpretationModels.map(model => {
+        let structuralInsight = "";
+        let dynamicsAesthetic = "normal";
+
+        // Purely logical deductions—zero HTML markup tags here
+        if (model.woodcockK > 2.0) {
+            structuralInsight = `The structural dataset reflects a highly localized axial strain field. This tightly bound spatial orientation typically highlights primary hinge zones or deep-seated tectonic shortening directions.`;
+            dynamicsAesthetic = "accent-critical";
+        } else if (model.woodcockK < 0.4) {
+            structuralInsight = `The calculated tensor profile establishes a cylindrical profile mapping. This suggests regional overprinting or representative cylindrical folding distributions common in polyphase deformation domains.`;
+            dynamicsAesthetic = "accent-girdle";
+        } else {
+            structuralInsight = `The geometric dispersion indicates distributed planar fabric tendencies, pointing toward complex fold-limb geometries or localized structural variations.`;
         }
-    }
 
-    if (totalL === 0) {
-        recommendations.push("<strong>Fieldwork Missing:</strong> Measure mineral stretching lineations across active profiles to tie kinematic slip coordinates.");
-    } else {
-        recommendations.push(`<strong>Linear Fabric Optimization:</strong> Mapped ${totalL} active lineations. Cross-check vectors against localized fold axis alignments.`);
-    }
-    
-    if (totalFA === 0) {
-        recommendations.push("<strong>Validation Gap:</strong> Direct map physical outcrop micro-fold hinge orientations to confirm tensor beta modeling.");
-    } else {
-        recommendations.push(`<strong>Hinge Verification Active:</strong> Mapped ${totalFA} direct minor fold axes. Monitor structural variance against computed beta nodes.`);
-    }
-    
-    if (!runtimeSummary.domains || runtimeSummary.domains.length <= 1) {
-        recommendations.push("<strong>Homogeneous Spatial Profile:</strong> Extend structural collection loops into adjacent domains to establish regional mapping consistency.");
-    }
+        return {
+            title: `${model.phaseName} Synthesis Narrative`,
+            classification: model.classificationTitle,
+            insightText: structuralInsight,
+            strengthSummary: `Fabric structural intensity parameter (Woodcock C) parses at ${model.woodcockC.toFixed(2)}, indicating a data dispersion weight profile matching ${model.sampleCount} recorded stations.`,
+            styleHook: dynamicsAesthetic
+        };
+    });
 
-    // Defend against empty arrays completely blanking out the QC section
-    if (recommendations.length === 0) {
-        recommendations.push("Baseline target data saturated. Structural geometric density matches reference profiles.");
+    // =================================================================
+    // TIER 3: HTML RENDERER (Takes text models, outputs presentation layer)
+    // =================================================================
+    const interpretationContainer = document.getElementById('interpretationContainer');
+    if (interpretationContainer) {
+        let compiledNarrativeHtml = "";
+
+        narrativeProseModels.forEach(prose => {
+            // Apply visual styling dynamically based on the narrative's semantic type
+            const leftBorderColor = prose.styleHook === "accent-critical" ? "#dc3545" : 
+                                    prose.styleHook === "accent-girdle" ? "#0284c7" : "#64748b";
+
+            compiledNarrativeHtml += `
+                <div class="narrative-block" style="border-left: 4px solid ${leftBorderColor}; background: #f8fafc; padding: 16px; margin-bottom: 16px; border-radius: 0 4px 4px 0;">
+                    <h4 style="margin: 0 0 6px 0; font-size: 14px; color: #0f172a;">${prose.title}</h4>
+                    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; font-weight: 600; margin-bottom: 8px;">
+                        Classification: ${prose.classification}
+                    </div>
+                    <p style="font-size: 13px; color: #334155; line-height: 1.5; margin: 0 0 8px 0;">
+                        ${prose.insightText}
+                    </p>
+                    <small style="font-size: 11px; color: #94a3b8; display: block; font-style: italic;">
+                        ${prose.strengthSummary}
+                    </small>
+                </div>
+            `;
+        });
+
+        interpretationContainer.innerHTML = compiledNarrativeHtml;
     }
+// =====================================================================
+// RULE-BASED STRUCTURAL RECOMMENDATIONS ENGINE (Generation Aware)
+// =====================================================================
+
+// ---------------------------------------------------------
+// Measurement Counts
+// ---------------------------------------------------------
+
+const totalL1  = (runtimeSummary.linear?.L1  || []).length;
+const totalL2  = (runtimeSummary.linear?.L2  || []).length;
+const totalL3  = (runtimeSummary.linear?.L3  || []).length;
+
+const totalFA1 = (runtimeSummary.foldAxis?.FA1 || []).length;
+const totalFA2 = (runtimeSummary.foldAxis?.FA2 || []).length;
+const totalFA3 = (runtimeSummary.foldAxis?.FA3 || []).length;
+
+const totalDomains = (runtimeSummary.domains || []).length;
+
+
+// ---------------------------------------------------------
+// Structural Recommendation Rules
+// ---------------------------------------------------------
+
+const structuralRuleset = [
+
+{
+    id: "R21",
+
+    priority: 1,
+
+    category: "Lineation",
+
+    title: "Missing L1 Measurements",
+
+    evaluate: () => totalL1 === 0,
+
+    recommendation:
+    "Measure L1 stretching lineations on S1 foliation surfaces to constrain transport direction and compare directly with the calculated β(S0,S1) fold axis."
+},
+
+{
+    id: "R22",
+
+    priority: 1,
+
+    category: "Lineation",
+
+    title: "Missing L2 Measurements",
+
+    evaluate: () => totalL2 === 0 && totalFA2 > 0,
+
+    recommendation:
+    "Collect L2 mineral or intersection lineations associated with F2 deformation to independently verify second-generation shortening directions."
+},
+
+{
+    id: "R23",
+
+    priority: 1,
+
+    category: "Lineation",
+
+    title: "Missing L3 Measurements",
+
+    evaluate: () => totalL3 === 0 && totalFA3 > 0,
+
+    recommendation:
+    "Acquire L3 lineation measurements where late-stage deformation fabrics are preserved to strengthen higher-order kinematic interpretations."
+},
+
+{
+    id: "R24",
+
+    priority: 1,
+
+    category: "Fold Axis",
+
+    title: "Missing FA1",
+
+    evaluate: () => totalFA1 === 0,
+
+    recommendation:
+    "Map F1 fold hinge traces (FA1) to independently validate the calculated β(S0,S1) statistical fold axis."
+},
+
+{
+    id: "R25",
+
+    priority: 1,
+
+    category: "Fold Axis",
+
+    title: "Missing FA2",
+
+    evaluate: () => totalFA2 === 0 && totalL2 > 0,
+
+    recommendation:
+    "Measure F2 hinge orientations (FA2) to verify the β(S1,S2) fold axis and evaluate progressive deformation."
+},
+
+{
+    id: "R26",
+
+    priority: 1,
+
+    category: "Fold Axis",
+
+    title: "Missing FA3",
+
+    evaluate: () => totalFA3 === 0 && totalL3 > 0,
+
+    recommendation:
+    "Record F3 fold hinges (FA3) wherever observable to validate late-stage deformation geometries."
+},
+
+{
+    id: "R27",
+
+    priority: 2,
+
+    category: "Structural Domains",
+
+    title: "Limited Domain Coverage",
+
+    evaluate: () => totalDomains <= 1,
+
+    recommendation:
+    "Extend structural mapping into additional domains to determine whether fold geometry remains regionally consistent or changes across lithological boundaries."
+},
+
+{
+    id: "R28",
+
+    priority: 2,
+
+    category: "Younging Indicators",
+
+    title: "Facing Direction Unknown",
+
+    evaluate: () => true,
+
+    recommendation:
+    "Record sedimentary younging indicators where preserved to distinguish upright from overturned fold limbs and improve vergence interpretation."
+},
+
+{
+    id: "R29",
+
+    priority: 2,
+
+    category: "Fold Geometry",
+
+    title: "Hinge Zone Density",
+
+    evaluate: () => true,
+
+    recommendation:
+    "Increase structural station density within inferred hinge zones to improve β-axis precision and cylindricity assessment."
+}
+
+];
+
+
+// ---------------------------------------------------------
+// Execute Recommendation Engine
+// ---------------------------------------------------------
+
+let recommendations = structuralRuleset
+
+.filter(rule => rule.evaluate())
+
+.sort((a,b)=>a.priority-b.priority);
+
+
+// ---------------------------------------------------------
+// Default Pass Condition
+// ---------------------------------------------------------
+
+if(recommendations.length===0){
+
+recommendations.push({
+
+id:"PASS",
+
+priority:999,
+
+category:"Quality Control",
+
+title:"Dataset Complete",
+
+recommendation:
+"No significant acquisition gaps were identified. The imported structural dataset satisfies the minimum analytical requirements for tensor analysis, β-axis determination, deformation-phase correlation, and structural interpretation."
+
+});
+
+}
 
     const chkBoxContainer = document.getElementById('checklistContainer');
     if (chkBoxContainer) {
@@ -1333,29 +1513,163 @@ try {
         });
     }
 
-    // Output Field Limitations Summary Notes
-    const limitations = [];
-    for (let pKey in analysisResults.global) {
-        let r = analysisResults.global[pKey];
-        if (!r) continue;
-        if (!r.beta) limitations.push(`Layer ${r.phase || pKey} point cluster/scatter configuration prevents unique fold axis extraction.`);
-        if (!r.faMean) limitations.push(`The calculated spatial beta-axis projection for phase ${r.phase || pKey} has not been verified via physical outcrop fold hinge coordinates.`);
-        if (r.beta && r.bootstrap && r.bootstrap.ci95 > 20) limitations.push(`Deformation phase layer ${r.phase || pKey} displays high orientation variance; bootstrap bounds are widely spread.`);
-    }
-    
-    let totalStations = runtimeSummary.stations || 0;
-    if (totalStations < 10) limitations.push(`Spatial tracking profile density remains highly localized (Count: ${totalStations} active stations).`);
-    if (limitations.length === 0) limitations.push("No severe geometrical data exceptions flag structural limits on the active profile.");
 
-    let limHtml = `<ul style="padding-left:20px; font-size:13px; margin:0 0 10px 0; line-height:1.5;">`;
-    limitations.forEach(l => { limHtml += `<li style="margin-bottom:4px;">${l}</li>`; });
-    limHtml += `</ul><div class="caution-box" style="background:#fef2f2; border-left:3px solid #ef4444; padding:8px; font-size:11px; color:#991b1b; border-radius:4px;"><strong>Domain Modeling Notice:</strong> Multi-domain calculations assume homogeneous planar characteristics inside explicit mapped sub-sectors.</div>`;
-    
-    // Safely write to either limitationsContainer or analysisNotes display ports if naming structures diverge
-    let limCont = document.getElementById('limitationsContainer') || document.getElementById('analysisNotesContainer') || document.getElementById('analysisNotes');
-    if (limCont) {
-        limCont.innerHTML = limHtml;
+// ==========================================================
+// ANALYTICAL LIMITATIONS & QUALITY NOTES
+// ==========================================================
+
+const limitations = [];
+
+for (const pKey in analysisResults.global) {
+
+    const r = analysisResults.global[pKey];
+    if (!r) continue;
+
+    // --------------------------------------------------
+    // No statistically meaningful fold axis
+    // --------------------------------------------------
+
+    if (!r.beta) {
+
+        limitations.push(
+            `Phase ${r.phase || pKey}: The planar fabric forms a single point-cluster or dispersed population. The available orientations do not define a statistically meaningful β-axis.`
+        );
+
+        continue;
     }
+
+    // --------------------------------------------------
+    // No measured fold axis available
+    // --------------------------------------------------
+
+    if (r.beta && !r.faMean) {
+
+        limitations.push(
+            `Phase ${r.phase || pKey}: No measured fold hinge (FA${r.phase || pKey}) was supplied. The calculated β-axis therefore remains an analytical prediction requiring field verification.`
+        );
+
+    }
+
+    // --------------------------------------------------
+    // Bootstrap uncertainty
+    // --------------------------------------------------
+
+    if (
+        r.beta &&
+        r.bootstrap &&
+        typeof r.bootstrap.ci95 === "number" &&
+        r.bootstrap.ci95 > 20
+    ) {
+
+        limitations.push(
+            `Phase ${r.phase || pKey}: Bootstrap confidence interval is broad (95% cone = ${r.bootstrap.ci95.toFixed(1)}°), indicating elevated orientation variability within this deformation phase.`
+        );
+
+    }
+
+}
+
+
+// ----------------------------------------------------------
+// Spatial sampling density
+// ----------------------------------------------------------
+
+const totalStations = runtimeSummary.stations || 0;
+
+if (totalStations < 10) {
+
+    limitations.push(
+        `Only ${totalStations} structural stations were analysed. Additional stations are recommended before extrapolating regional fold geometry.`
+    );
+
+}
+
+
+// ----------------------------------------------------------
+// Structural domain coverage
+// ----------------------------------------------------------
+
+const totalDomains = (runtimeSummary.domains || []).length;
+
+if (totalDomains <= 1) {
+
+    limitations.push(
+        `Measurements originate from a single mapped structural domain. Regional extrapolation should therefore be made with caution until adjacent domains are investigated.`
+    );
+
+}
+
+
+// ----------------------------------------------------------
+// Default message
+// ----------------------------------------------------------
+
+if (limitations.length === 0) {
+
+    limitations.push(
+        "No significant analytical limitations were identified. The imported structural dataset satisfies the current quality criteria for statistical fold analysis."
+    );
+
+}
+
+
+// ----------------------------------------------------------
+// Render HTML
+// ----------------------------------------------------------
+
+let limHtml = `
+<ul style="
+padding-left:20px;
+font-size:13px;
+margin:0 0 10px 0;
+line-height:1.6;
+">
+`;
+
+limitations.forEach(item => {
+
+    limHtml += `
+    <li style="margin-bottom:6px;">
+        ${item}
+    </li>
+    `;
+
+});
+
+limHtml += `
+</ul>
+
+<div class="caution-box"
+style="
+background:#fef2f2;
+border-left:4px solid #dc2626;
+padding:10px;
+font-size:12px;
+color:#7f1d1d;
+border-radius:5px;
+">
+
+<strong>Interpretation Notice</strong><br>
+
+Calculated β-axes represent statistically derived fold-axis estimates based on imported planar orientations. Geological interpretation should always be integrated with field observations, mapped hinge traces, younging criteria, and independent structural evidence before regional tectonic conclusions are drawn.
+
+</div>
+`;
+
+
+// ----------------------------------------------------------
+// Safe output routing
+// ----------------------------------------------------------
+
+const limCont =
+      document.getElementById("limitationsContainer") ||
+      document.getElementById("analysisNotesContainer") ||
+      document.getElementById("analysisNotes");
+
+if (limCont) {
+
+    limCont.innerHTML = limHtml;
+
 }
     
 // ==========================================
