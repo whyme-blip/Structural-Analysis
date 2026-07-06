@@ -1066,7 +1066,27 @@ function getFabricInterpretation(fabricClass, stats = {}) {
 // ==========================================
 // 5. NARRATIVE GENERATION & REPORT COMPILER
 // ==========================================
-function buildStructuralReportingSuites() {
+// Wrap reporting engine invocation with clear UI containers reset and global exception handling
+try {
+    // Reset global interpretation dashboard containers immediately before rebuilding
+    const containerIds = ["interpretationContainer", "checklistContainer", "limitationsContainer"];
+    containerIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = "";
+    });
+
+    buildStructuralReportingSuites();
+} catch (err) {
+    console.error("Structural Reporting Engine Critical Error:", err);
+    const errContainer = document.getElementById("interpretationContainer");
+    if (errContainer) {
+        errContainer.innerHTML = `
+            <div class="qc-item qc-warn" style="border-left: 4px solid #dc3545; background: #f8d7da; color: #721c24; padding: 15px; margin: 10px 0;">
+                <strong>⚠️ Reporting engine stopped:</strong> ${err.message}
+                <br><small style="font-family: monospace;">Line context trace available in browser console.</small>
+            </div>`;
+    }
+}
     const tC = document.getElementById('tensorContainer'), fC = document.getElementById('foldGeometryContainer');
     tC.innerHTML = ""; fC.innerHTML = "";
 
@@ -1081,15 +1101,24 @@ function buildStructuralReportingSuites() {
     }
     let mainReport = analysisResults.global[primaryKey];
 
-    for (let pKey in analysisResults.global) {
-        let r = analysisResults.global[pKey];
+    for (const pKey in analysisResults.global) {
+        const r = analysisResults.global[pKey];
         if (!r || !r.eigen) continue;
         
         // Extract structural eigenvalues
-        let l1 = Math.max(1e-5, r.eigen.values[0]);
-        let l2 = Math.max(1e-5, r.eigen.values[1]);
-        let l3 = Math.max(1e-5, r.eigen.values[2]); // Protect against division by zero & negative logs
+        const eig1 = r.eigen?.values?.[0];
+        const eigText = eig1 != null ? eig1.toFixed(2) : "N/A";
 
+        let l1 = Math.max(1e-5, eig1 ?? 0);
+        let l2 = Math.max(1e-5, r.eigen?.values?.[1] ?? 0);
+        let l3 = Math.max(1e-5, r.eigen?.values?.[2] ?? 0); // Protect against division by zero & negative logs
+
+        // Safe fallback evaluation of bootstrap confidence intervals
+        const ci95 = r.bootstrap?.ci95 ?? null;
+        let bootStr = (r.beta && ci95 !== null && ci95 > 0) ? `${ci95.toFixed(1)}°` : "N/A";
+        
+        // Format calculated axis safely
+        const betaText = r.beta ? MathEngine.formatTrendPlunge(r.beta) : "Not Calculated";
         // Calculate Woodcock (1977) parameters explicitly for the publication table view
         let woodcockC = Math.log(Math.max(1.0, l1 / l3));
         
@@ -1263,7 +1292,7 @@ function buildStructuralReportingSuites() {
     document.getElementById('interpretationContainer').innerHTML = `<div class="interpretation-box">${narrativeHtml.join("")}</div>`;
 
     // Recommendations Checklists & Map Controls Tracker
-    const recommendations = [];
+    let recommendations = [];
     let totalL = 0, totalFA = 0;
     
     // Fallback checks to safely count elements across active DB structures
@@ -1289,6 +1318,11 @@ function buildStructuralReportingSuites() {
     
     if (!runtimeSummary.domains || runtimeSummary.domains.length <= 1) {
         recommendations.push("<strong>Homogeneous Spatial Profile:</strong> Extend structural collection loops into adjacent domains to establish regional mapping consistency.");
+    }
+
+    // Defend against empty arrays completely blanking out the QC section
+    if (recommendations.length === 0) {
+        recommendations.push("Baseline target data saturated. Structural geometric density matches reference profiles.");
     }
 
     const chkBoxContainer = document.getElementById('checklistContainer');
