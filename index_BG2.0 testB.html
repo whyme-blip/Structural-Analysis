@@ -661,10 +661,14 @@ const MathEngine = {
             axes.push(this.calculateBetaAxis(sample));
         }
         let R = [0,0,0];
+        let validCount = 0;
         axes.forEach(a => {
+            if (!a) return;
             let v = this.trendPlungeToVector(a.trend, a.plunge);
             for(let i=0; i<3; i++) R[i] += v[i];
+            validCount++;
         });
+        if (validCount === 0) return { trend: 0, plunge: 0, ci95: 0 };
         let rLen = Math.sqrt(R[0]*R[0] + R[1]*R[1] + R[2]*R[2]);
         let bMean = this.vectorToTrendPlunge(R.map(x => x / rLen));
 
@@ -1267,6 +1271,17 @@ function executeSuite() {
     document.getElementById('polyphaseWarningContainer').innerHTML = `<div class="qc-item qc-pass"><strong>Phasor Engine Live:</strong> Data evaluated across explicit generational vectors. Mapped Domains: [${runtimeSummary.domains.join(", ")}].</div>`;
 }
 
+function exportDataToCSV() {
+    const csvContent = document.getElementById('csvInput').value;
+    if (!csvContent.trim()) { alert("No data available to export."); return; }
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute("download", "Extracted_Structural_Data.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
 function toggleTextArea() { const c = document.getElementById('textareaContainer'); c.style.display = (c.style.display === 'block') ? 'none' : 'block'; }
 function toggleAdvancedSettings() { const e = document.getElementById('advancedContent'); e.style.display = (e.style.display === 'block') ? 'none' : 'block'; }
 function downloadTemplate() {
