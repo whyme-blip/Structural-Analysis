@@ -471,6 +471,18 @@ const InputLayer = {
             let strVal = parseFloat(row.strike || row.trend), dipVal = parseFloat(row.dip || row.plunge);
             if (isNaN(lat) || isNaN(lon) || isNaN(strVal) || isNaN(dipVal)) continue;
 
+            // Boundary validation check: Strike/Trend (0-360) and Dip/Plunge (0-90)
+            if (strVal < 0 || strVal > 360 || dipVal < 0 || dipVal > 90) {
+                let errorMsg = `Line ${i + 1} (Station: ${row.station || 'N/A'}): Dropped out-of-bounds geometry [Strike/Trend: ${strVal}°, Dip/Plunge: ${dipVal}°]. Limits are 0-360° and 0-90°.`;
+                
+                // Track internally for the Validation Status & QC template engine
+                if (!analysisResults.qcWarnings) analysisResults.qcWarnings = [];
+                analysisResults.qcWarnings.push(errorMsg);
+                
+                console.warn(errorMsg);
+                continue; // Safe drop: Skip vector projection and database allocation
+            }
+
             let sType = this.normalizeStructureName(row.structure);
             let stId = row.station || `ST${i}`, dId = row.domain || 'Global', lth = row.lithology || 'Unknown';
             
