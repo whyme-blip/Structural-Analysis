@@ -397,7 +397,45 @@ ST02,30.114,78.246,L2,315,16,2,A,Quartzite,</textarea>
             </details>
         </div>
     </div>
+<!-- ========================================== -->
+<!-- GLOBAL EVIDENCE & VALIDATION MATRIX        -->
+<!-- ========================================== -->
+<div id="global-evidence-section" class="dashboard-panel" style="margin-top: 30px;">
+    
+    <!-- Global Summary Scorecards -->
+    <div style="display: flex; gap: 20px; margin-bottom: 20px;">
+        <div class="card" style="flex: 1; padding: 15px; background: #f8f9fa; border: 1px solid #ddd; border-radius: 8px;">
+            <h4 style="margin: 0 0 10px 0; color: #555;">Matrix Reliability</h4>
+            <h2 id="global-reliability" style="margin: 0; color: #2c3e50;">--</h2>
+        </div>
+        <div class="card" style="flex: 1; padding: 15px; background: #f8f9fa; border: 1px solid #ddd; border-radius: 8px;">
+            <h4 style="margin: 0 0 10px 0; color: #555;">Overall Evidence Score</h4>
+            <h2 id="global-evidence-score" style="margin: 0; color: #27ae60;">--%</h2>
+        </div>
+    </div>
 
+    <!-- Validation Matrix Table -->
+    <div class="card structural-matrix-card" style="padding: 15px; background: #fff; border: 1px solid #ddd; border-radius: 8px;">
+        <h3 style="margin-top: 0;">Inter-Fabric Validation Matrix</h3>
+        <table style="width: 100%; text-align: left; border-collapse: collapse;">
+            <thead>
+                <tr style="background-color: #f1f1f1; border-bottom: 2px solid #ccc;">
+                    <th style="padding: 10px;">Structural Pair</th>
+                    <th style="padding: 10px;">Fabric Type</th>
+                    <th style="padding: 10px;">Sample Count</th>
+                    <th style="padding: 10px;">Angular Misfit</th>
+                    <th style="padding: 10px;">Correlation Grade</th>
+                </tr>
+            </thead>
+            <!-- The Javascript targets this exact ID to inject the rows -->
+            <tbody id="matrix-table-body">
+                <!-- JavaScript will dynamically inject the <tr> rows here -->
+            </tbody>
+        </table>
+    </div>
+    
+</div>
+    
 <script>
 // ==========================================
 // GLOBALS & REPOSITORIES
@@ -659,314 +697,78 @@ function analyseAllPhases() {
     };
 }
 // ==========================================
-// STAGE 5: OBJECT-BASED RECOMMENDATION ENGINE
-// ==========================================
-function generateRecommendations() {
-    analysisResults.recommendations = [];
-    
-    const targetChecks = [
-        { pk: "S0", fk: "FA1", lk: "L1", suffix: "1" },
-        { pk: "S1", fk: "FA2", lk: "L2", suffix: "2" },
-        { pk: "S2", fk: "FA3", lk: "L3", suffix: "3" }
-    ];
-
-    targetChecks.forEach(c => {
-        let pCount = (geometry.planar[c.pk] || []).length;
-        let faCount = (geometry.foldAxis[c.fk] || []).length;
-        let lCount = (geometry.linear[c.lk] || []).length;
-
-        if (pCount > 0 && pCount < 5) {
-            analysisResults.recommendations.push({
-                priority: 1,
-                category: "Structural Density",
-                text: `Acquire additional structural data allocations for ${c.pk} (currently ${pCount}) to solidify beta hinge configurations.`
-            });
-        }
-        if (pCount >= 3 && faCount === 0) {
-            analysisResults.recommendations.push({
-                priority: 1,
-                category: "Field Validation",
-                text: `Locate and record physical fold hinge components (${c.fk}) to independently verify the calculated &beta;(${c.pk}) projection.`
-            });
-        }
-        if (pCount >= 3 && lCount === 0) {
-            analysisResults.recommendations.push({
-                priority: 2,
-                category: "Kinematics",
-                text: `Map out matching lineation structural networks (${c.lk}) to cross-check strain kinematics with phase rotation paths.`
-            });
-        }
-    });
-
-    if (runtimeSummary.domains.length <= 1) {
-        analysisResults.recommendations.push({
-            priority: 2,
-            category: "Domain Partitioning",
-            text: "Data tracking is clustered globally. Expand structural survey footprints into alternative zones to screen for regional hinge rotations."
-        });
-    }
-    if (!runtimeSummary.hasYounging) {
-        analysisResults.recommendations.push({
-            priority: 2,
-            category: "Facing Indicators",
-            text: "Incorporate primary sedimentary or volcanic facing structures to verify structural vergence and locate overturned panels."
-        });
-    }
-
-    if (analysisResults.recommendations.length === 0) {
-        analysisResults.recommendations.push({ priority: 3, category: "Quality Assessment", text: "Database meets all geometric logging parameters. Continue regional trace verification." });
-    }
-}
-
-// ==========================================
-// STAGE 6: OBJECT-BASED LIMITATION ENGINE
-// ==========================================
-function generateLimitations() {
-    analysisResults.limitations = [];
-
-    for (const phaseKey in analysisResults.phase) {
-        const pData = analysisResults.phase[phaseKey];
-        if (!pData) continue;
-
-        let pCount = (geometry.planar[phaseKey] || []).length;
-        if (pCount > 0 && pCount < 4) {
-            analysisResults.limitations.push({
-                priority: 1,
-                category: "Sample Deficiency",
-                text: `Phase ${phaseKey} calculations use low density markers (n=${pCount}). High risk of structural sampling bias.`
-            });
-        }
-        if (pData.classification === "Point Cluster") {
-            analysisResults.limitations.push({
-                priority: 1,
-                category: "Geometric Dispersion Gap",
-                text: `Planar fabric ${phaseKey} maps as a single cluster profile; structural beta generation cannot calculate rotational properties.`
-            });
-        }
-        if (pData.bootstrap && pData.bootstrap.ci95 > 20) {
-            analysisResults.limitations.push({
-                priority: 2,
-                category: "Tensor Variance instability",
-                text: `Phase ${phaseKey} bootstrap evaluation contains an wide dispersion path (&plusmn;${pData.bootstrap.ci95.toFixed(1)}°), signaling irregular geometry.`
-            });
-        }
-    }
-
-    if (runtimeSummary.stations < 8) {
-        analysisResults.limitations.push({
-            priority: 2,
-            category: "Spatial Gaps",
-            text: `Field report generated from only ${runtimeSummary.stations} active stations. Risk of localized over-interpretation.`
-        });
-    }
-}
-
-// ==========================================
-// STAGE 7: NARRATIVE MATRIX COMPILER
-// ==========================================
-function compileNarrative() {
-    let pKey = "S0";
-    if (!geometry.planar[pKey] || geometry.planar[pKey].length < 2) {
-        let valid = Object.keys(analysisResults.phase).find(k => analysisResults.phase[k] && (geometry.planar[k] || []).length >= 2);
-        if (valid) pKey = valid;
-    }
-    
-    let active = analysisResults.phase[pKey];
-    if (!active || active.classification === "Insufficient Data") {
-        analysisResults.narrative = {
-            summary: "Structural analysis suspended.",
-            interpretation: "Data imports do not provide enough planar dispersion matching operational minimum configurations.",
-            diagnosis: "Database needs further baseline structural entry configurations."
-        };
-        return;
-    }
-
-    let summaryText = `Regional fabric summary tracks data distributions mapped across ${runtimeSummary.stations} field stations. Primary fabric analysis uses ${pKey} surfaces, yielding a ${active.classification} classification.`;
-    let interText = `Tensor profiling registers a fabric density constraint metric of C = ${active.woodcock.C.toFixed(2)} and shape component K = ${active.woodcock.K.toFixed(2)}. This matches structural patterns observed across ${runtimeSummary.domains.join(', ')} domains.`;
-    
-    let diagText = "";
-    if (active.beta) {
-        diagText = `Calculated beta axis projects along trajectory ${Math.round(active.beta.trend).toString().padStart(3,'0')}°/${Math.round(active.beta.plunge).toString().padStart(2,'0')}°. Kinematic parameters indicate a ${MathEngine.getPlungeCharacter(active.beta.plunge)} profile configuration.`;
-    } else {
-        diagText = "Lack of planar variance implies a single homoclinal panel or tightly appressed, parallel fold domain lines.";
-    }
-
-    analysisResults.narrative = { summary: summaryText, interpretation: interText, diagnosis: diagText };
-}
-
-// ==========================================
 // STAGE 8: ISOLATED RENDERING LAYER
 // ==========================================
 function renderEverything() {
-    // 1. Dashboard Totals Card Elements
-    document.getElementById('inv-stations').innerText = runtimeSummary.stations;
-    document.getElementById('inv-total').innerText = runtimeSummary.measurements;
-    document.getElementById('inv-domains').innerText = runtimeSummary.domains.length;
-    document.getElementById('inv-litho').innerText = runtimeSummary.lithologies.length;
+    // Loop through each structured generation phase
+    ["F1", "F2", "F3"].forEach(phase => {
+        const data = analysisResults.phase[phase];
+        
+        // If data doesn't exist for this phase (e.g., no planar data was parsed), skip it or clear it
+        if (!data) {
+            document.getElementById(`${phase}-container`).style.display = "none";
+            return;
+        }
 
-    document.getElementById('inv-s0').innerText = (geometry.planar.S0 || []).length;
-    document.getElementById('inv-s1').innerText = (geometry.planar.S1 || []).length;
-    document.getElementById('inv-s2').innerText = (geometry.planar.S2 || []).length;
-    document.getElementById('inv-s3').innerText = (geometry.planar.S3 || []).length;
+        // Make sure the container is visible if data exists
+        document.getElementById(`${phase}-container`).style.display = "block";
 
-    document.getElementById('inv-l1').innerText = (geometry.linear.L1 || []).length;
-    document.getElementById('inv-l2').innerText = (geometry.linear.L2 || []).length;
-    document.getElementById('inv-l3').innerText = (geometry.linear.L3 || []).length;
-    document.getElementById('inv-fa').innerText = ((geometry.foldAxis.FA1 || []).length + (geometry.foldAxis.FA2 || []).length + (geometry.foldAxis.FA3 || []).length);
+        // 1. Render Core Beta Axis Metrics
+        document.getElementById(`${phase}-beta-trend`).innerText = data.beta.trend.toFixed(1);
+        document.getElementById(`${phase}-beta-plunge`).innerText = data.beta.plunge.toFixed(1);
 
-    // 2. Average Bedding Structural Statistics Table
-    let s0List = geometry.planar.S0 || [];
-    let geoStatsHtml = "";
-    if (s0List.length > 0) {
-        let dips = s0List.map(p => p.dip), avg = dips.reduce((a,b)=>a+b,0)/dips.length;
-        geoStatsHtml = `<table>
-            <tr><th>Avg Bedding Dip</th><td>${avg.toFixed(0)}°</td></tr>
-            <tr><th>Min/Max Dip</th><td>${Math.min(...dips)}° / ${Math.max(...dips)}°</td></tr>
-        </table>`;
-    } else {
-        geoStatsHtml = "<div style='font-size:12px; color:var(--text-muted); padding:8px;'>No S₀ bedding elements recorded.</div>";
-    }
-    document.getElementById('geoStatisticsContainer').innerHTML = geoStatsHtml;
+        // 2. Render Folding Cylindricity & Profiles
+        document.getElementById(`${phase}-woodcock`).innerText = data.cylindricity.woodcockParameter.toFixed(2);
+        document.getElementById(`${phase}-profile-type`).innerText = data.cylindricity.profile;
 
-    // 3. Main Dashboard Overview Parameters
-    let pKey = analysisResults.phase.S0?.beta ? "S0" : (analysisResults.phase.S1?.beta ? "S1" : null);
-    if (!pKey) pKey = Object.keys(analysisResults.phase).find(k => analysisResults.phase[k]?.beta) || "S0";
-    let mainPhase = analysisResults.phase[pKey];
+        // 3. Render Field Fabric Correlations (Misfits)
+        document.getElementById(`${phase}-fa-misfit`).innerText = data.FAcomparison.misfit !== null 
+            ? `${data.FAcomparison.misfit.toFixed(1)}° (${data.FAcomparison.grade})` 
+            : "No Observed Data";
 
-    if (mainPhase && mainPhase.beta) {
-        document.getElementById('card-trend-plunge').innerHTML = `Trend: ${Math.round(mainPhase.beta.trend).toString().padStart(3,'0')}°<br>Plunge: ${Math.round(mainPhase.beta.plunge).toString().padStart(2,'0')}°`;
-        document.getElementById('card-cyl-val').innerText = `${mainPhase.confidence.cylindricity}%`;
-        document.getElementById('card-cyl-profile').innerText = `RMS ${mainPhase.confidence.rms.toFixed(2)}° Residual`;
-        document.getElementById('card-character').innerText = MathEngine.getPlungeCharacter(mainPhase.beta.plunge);
-        document.getElementById('conf-overall').innerText = mainPhase.confidence.overall;
-        document.getElementById('conf-stars').innerText = mainPhase.confidence.reliability >= 75 ? "★★★★★" : "★★★☆☆";
-    } else {
-        document.getElementById('card-trend-plunge').innerHTML = `<span style="color:#dc2626; font-size:13px; font-weight:700;">No Beta Axis</span>`;
-        document.getElementById('card-cyl-val').innerText = "N/A";
-        document.getElementById('card-cyl-profile').innerText = "Non-Girdle Dispersion Block";
-        document.getElementById('card-character').innerText = "Planar Cluster / Random";
-        document.getElementById('conf-overall').innerText = "0%";
-        document.getElementById('conf-stars').innerText = "☆☆☆☆☆";
-    }
+        document.getElementById(`${phase}-l-misfit`).innerText = data.Lcomparison.misfit !== null 
+            ? `${data.Lcomparison.misfit.toFixed(1)}° (${data.Lcomparison.grade})` 
+            : "No Observed Data";
 
-    if (analysisResults.evidence) {
-        document.getElementById('conf-quality').innerText = mainPhase?.confidence?.quality || "Insufficient";
-        document.getElementById('conf-verification').innerText = `Matrix Quality: ${analysisResults.evidence.reliability} (${analysisResults.evidence.confidence})`;
-    }
+        // 4. Render Confidence Badge & Text Narrative
+        document.getElementById(`${phase}-confidence`).innerText = data.confidence.grade;
+        document.getElementById(`${phase}-narrative`).innerText = data.narrative;
 
-    // 4. Orientation Tensor Component Output Rendering
-    let tensorHtml = "";
-    for (const pk in analysisResults.phase) {
-        let pData = analysisResults.phase[pk];
-        if (!pData || (geometry.planar[pk] || []).length === 0) continue;
-        tensorHtml += `
-        <div style="font-size:13px; font-weight:700; margin-top:12px; color:#1e293b;">Phase ${pk} Tensor Metrics</div>
-        <table>
-            <tr><th>&lambda;₁ (Dominant Axis Vector)</th><td>${pData.eigen.values[0].toFixed(4)}</td></tr>
-            <tr><th>&lambda;₂ (Intermediate Axis Vector)</th><td>${pData.eigen.values[1].toFixed(4)}</td></tr>
-            <tr><th>&lambda;₃ (Minor Axis Vector)</th><td>${pData.eigen.values[2].toFixed(4)}</td></tr>
-            <tr style="border-top:1px dashed #cbd5e1;"><th>Woodcock Structural Shape (K)</th><td>${pData.woodcock.K.toFixed(3)}</td></tr>
-            <tr><th>Fabric Intensity Strength (C)</th><td>${pData.woodcock.C.toFixed(3)}</td></tr>
-            <tr style="background:#f8fafc; font-weight:bold;"><th>Fabric Distribution Style</th><td>${pData.classification}</td></tr>
-        </table>`;
-    }
-    document.getElementById('tensorContainer').innerHTML = tensorHtml || "<div style='font-size:12px; padding:8px;'>No tensor data compiled.</div>";
+        // 5. Render Dynamic Recommendations List
+        const recsUL = document.getElementById(`${phase}-recommendations`);
+        recsUL.innerHTML = data.recommendations.map(rec => `<li>${rec}</li>`).join("");
 
-    // 5. Fold Geometry Profile Calculations
-    let foldHtml = "";
-    for (const pk in analysisResults.phase) {
-        let pData = analysisResults.phase[pk];
-        if (!pData || (geometry.planar[pk] || []).length === 0) continue;
-        let bStr = pData.beta ? `${Math.round(pData.beta.trend).toString().padStart(3,'0')}°/${Math.round(pData.beta.plunge).toString().padStart(2,'0')}°` : "N/A";
-        let bootStr = (pData.beta && pData.bootstrap.ci95 > 0) ? `&plusmn;${pData.bootstrap.ci95.toFixed(1)}°` : "N/A";
-        foldHtml += `
-        <div style="font-size:13px; font-weight:700; margin-top:12px; color:#1e293b;">Phase ${pk} Fold Profiling</div>
-        <table>
-            <tr><th>Calculated Lineation &beta;-axis</th><td><strong>${bStr}</strong></td></tr>
-            <tr><th>95% Bootstrap Cone Limit</th><td>${bootStr}</td></tr>
-            <tr><th>Cylindricity Structural Fit Index</th><td>${pData.beta ? pData.confidence.cylindricity + '%' : 'N/A'}</td></tr>
-            <tr><th>Fisher Concentration Factor (k)</th><td>${pData.confidence.fisherK ? pData.confidence.fisherK.toFixed(1) : '0.0'}</td></tr>
-        </table>`;
-    }
-    document.getElementById('foldGeometryContainer').innerHTML = foldHtml || "<div style='font-size:12px; padding:8px;'>No fold profiles compiled.</div>";
-
-    // 6. Cross-Fabric Evidence Multi-Matrix Table
-    let tableHtml = `
-    <table>
-        <thead>
-            <tr>
-                <th>Kinematic System Link</th>
-                <th>Calculated Beta Coordinate</th>
-                <th>Field Object Component</th>
-                <th>Calculated Misfit Angle</th>
-                <th>Evaluation Matrix Grade</th>
-            </tr>
-        </thead>
-        <tbody>`;
-    if (analysisResults.evidence && analysisResults.evidence.table) {
-        analysisResults.evidence.table.forEach(row => {
-            let misfitDisplay = row.misfit !== null ? `${row.misfit.toFixed(1)}°` : "--";
-            tableHtml += `<tr>
-                <td><strong>${row.label}</strong></td>
-                <td>Verified Output Target</td>
-                <td>Observations Counted (n=${row.count})</td>
-                <td><span class="badge">${misfitDisplay}</span></td>
-                <td><strong>${row.grade}</strong></td>
-            </tr>`;
-        });
-    }
-    tableHtml += `</tbody></table>`;
-    document.getElementById('correlationContainer').innerHTML = tableHtml;
-
-    // 7. Structural Field Narrative Assembly
-    if (analysisResults.narrative) {
-        document.getElementById('interpretationContainer').innerHTML = `
-        <div class="interpretation-box">
-            <strong>System Summary Profile:</strong> ${analysisResults.narrative.summary}<br><br>
-            <strong>Fabric Layout Interpretation:</strong> ${analysisResults.narrative.interpretation}
-        </div>
-        <div class="diagnosis-banner">
-            <h4>Tectonic Synthesis Diagnosis Matrix</h4>
-            <p style="font-size:13px; line-height:1.6; margin:0;">${analysisResults.narrative.diagnosis}</p>
-        </div>`;
-    }
-
-    // 8. Dynamic Recommendations Verification Matrix Checklist
-    let chkHtml = "";
-    analysisResults.recommendations.forEach(r => {
-        chkHtml += `
-        <div class="checklist-item">
-            <input type="checkbox">
-            <div><span style="font-weight:700; text-transform:uppercase; font-size:11px; color:var(--secondary);">[${r.category}]</span> ${r.text}</div>
-        </div>`;
+        // 6. Render Dynamic Limitations List
+        const limitsUL = document.getElementById(`${phase}-limitations`);
+        limitsUL.innerHTML = data.limitations.map(lim => `<li>${lim}</li>`).join("");
     });
-    document.getElementById('checklistContainer').innerHTML = chkHtml || "<div style='font-size:12px; padding:8px;'>All verification steps clear.</div>";
 
-    // 9. Analytical Mapping Limitations & Verification Warning Block
-    let limHtml = "<ul style='padding-left:20px; font-size:13px; line-height:1.6;'>";
-    analysisResults.limitations.forEach(l => {
-        limHtml += `<li style='margin-bottom:6px;'><strong>[${l.category}]</strong> ${l.text}</li>`;
-    });
-    limHtml += "</ul>";
-    limHtml += `
-    <div class="caution-box">
-        <strong>Field Constraints Interpretation Warning notice:</strong><br>
-        Calculated beta axes constitute mathematical projection configurations derived solely from imported orientation subsets. Dynamic processing loops operate offline without verifying raw structural topographic boundaries or younging profiles. Cross-check all models with localized spatial mappings.
-    </div>`;
-    document.getElementById('limitationsContainer').innerHTML = limHtml;
-
-    // 10. Technical Quality Logs Stream
-    let qcH封闭 = "";
-    if (analysisResults.qcWarnings.length > 0) {
-        analysisResults.qcWarnings.forEach(w => {
-            qcH封闭 += `<div class="qc-item qc-warn">${w}</div>`;
-        });
-    } else {
-        qcH封闭 = `<div class="qc-item qc-pass">Orientation tensor integrity constraints passed. Data boundaries fit valid structural calculation ranges.</div>`;
-    }
-    document.getElementById('qcLogs').innerHTML = qcH封闭;
+    // 7. Render Global Inter-Fabric Evidence Summary Table
+    renderEvidenceMatrixTable();
 }
 
+function renderEvidenceMatrixTable() {
+    const evidenceData = analysisResults.evidence;
+    
+    // Update global summary cards
+    document.getElementById("global-evidence-score").innerText = evidenceData.evidenceScore;
+    document.getElementById("global-reliability").innerText = evidenceData.reliability;
+
+    // Populate the HTML matrix table rows
+    const tableBody = document.getElementById("matrix-table-body");
+    tableBody.innerHTML = evidenceData.table.map(row => {
+        const misfitText = row.misfit !== null ? `${row.misfit.toFixed(1)}°` : "—";
+        return `
+            <tr>
+                <td><strong>${row.label}</strong></td>
+                <td><span class="badge badge-${row.type.toLowerCase()}">${row.type}</span></td>
+                <td>${row.count} points</td>
+                <td>${misfitText}</td>
+                <td><span class="grade-badge grade-${row.grade.toLowerCase()}">${row.grade}</span></td>
+            </tr>
+        `;
+    }).join("");
+}    
 // ==========================================
 // VISUAL GRAPHICS RENDERING CANVAS BACKEND
 // ==========================================
@@ -1054,6 +856,6 @@ function handleFile(file) {
     const r = new FileReader(); r.onload = (e) => { document.getElementById('csvInput').value = e.target.result; executeSuite(); }; r.readAsText(file);
 }
 window.onload = () => { executeSuite(); };
-</script>
+</>
 </body>
 </html>
