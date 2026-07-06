@@ -400,25 +400,26 @@ ST02,30.114,78.246,L2,315,16,2,A,Quartzite,</textarea>
 
 <script>
 // ==========================================
-// 1. MASTER PHASIC STRUCTURAL DATABASE
+// GLOBALS & REPOSITORIES
 // ==========================================
-class StructuralPhaseData {
-    constructor(phaseNum) {
-        this.phase = phaseNum;
-        this.planar = [];    // Holds matching elements (P1: S0,S1 | P2: S1,S2 | P3: S2,S3)
-        this.linear = [];    // Holds lineations (P1: L1 | P2: L2 | P3: L3)
-        this.foldAxis = [];  // Holds field measurements (P1: FA1 | P2: FA2 | P3: FA3)
-    }
-}
+let runtimeSummary = { stations: 0, measurements: 0, domains: [], lithologies: [], hasYounging: false };
 
-let structuralDB = {
-    phases: [null, new StructuralPhaseData(1), new StructuralPhaseData(2), new StructuralPhaseData(3)],
-    domains: {}, // Schema: { "DomainName": { phases: [null, PhaseData, PhaseData, PhaseData] } }
-    stations: {}
+// Stage 2 Geometry Router Repository
+let geometry = {
+    planar: { S0: [], S1: [], S2: [], S3: [] },
+    linear: { L1: [], L2: [], L3: [] },
+    foldAxis: { FA1: [], FA2: [], FA3: [] }
 };
 
-let analysisResults = { global: {}, domains: {} };
-let runtimeSummary = { stations: 0, measurements: 0, domains: [], lithologies: [], hasYounging: false };
+// Stage 3-7 Analysis Results Repository
+let analysisResults = {
+    phase: { S0: null, S1: null, S2: null, S3: null },
+    evidence: null,
+    recommendations: [],
+    limitations: [],
+    narrative: null,
+    qcWarnings: []
+};
 
 const symbolsConfig = {
     'S0': { char: '●', color: '#2563eb', label: 'Bedding S0' }, 'S1': { char: '▲', color: '#16a34a', label: 'Foliation S1' },
@@ -428,136 +429,38 @@ const symbolsConfig = {
     'FA2': { char: '⊗', color: '#334155', label: 'Axis FA2' }, 'FA3': { char: '⊗', color: '#475569', label: 'Axis FA3' }
 };
 
-const InputLayer = {
-    normalizeStructureName(raw) {
-        if (!raw) return 'S0'; const c = raw.toUpperCase().replace(/[\s_\-]/g, '');
-        if (['FOLDAXIS', 'FOLDAXIS1', 'FA1', 'FA'].includes(c)) return 'FA1';
-        if (['FOLDAXIS2', 'FA2'].includes(c)) return 'FA2';
-        if (['FOLDAXIS3', 'FA3'].includes(c)) return 'FA3';
-        return c;
-    },
-
-    initializeDB() {
-        structuralDB = {
-            phases: [null, new StructuralPhaseData(1), new StructuralPhaseData(2), new StructuralPhaseData(3)],
-            domains: {}, stations: {}
-        };
-        analysisResults = { global: {}, domains: {} };
-        runtimeSummary = { stations: 0, measurements: 0, domains: [], lithologies: [], hasYounging: false };
-    },
-
-    initDomainSubstructures(domName) {
-        if (!structuralDB.domains[domName]) {
-            structuralDB.domains[domName] = {
-                phases: [null, new StructuralPhaseData(1), new StructuralPhaseData(2), new StructuralPhaseData(3)]
-            };
-        }
-    },
-
-    parseCSV(text) {
-        this.initializeDB();
-        const lines = text.trim().split('\n');
-        if (lines.length < 2) return { logs: [{msg: "Empty dataset submitted.", type:"warn"}] };
-        
-        const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-        let stSet = new Set(), domSet = new Set(), lithSet = new Set();
-
-        for (let i = 1; i < lines.length; i++) {
-            if (!lines[i].trim()) continue;
-            const cols = lines[i].split(',').map(c => c.trim()); let row = {};
-            headers.forEach((h, idx) => { row[h] = cols[idx]; });
-            
-            let lat = parseFloat(row.latitude), lon = parseFloat(row.longitude);
-            let strVal = parseFloat(row.strike || row.trend), dipVal = parseFloat(row.dip || row.plunge);
-            if (isNaN(lat) || isNaN(lon) || isNaN(strVal) || isNaN(dipVal)) continue;
-
-            // Boundary validation check: Strike/Trend (0-360) and Dip/Plunge (0-90)
-            if (strVal < 0 || strVal > 360 || dipVal < 0 || dipVal > 90) {
-                let errorMsg = `Line ${i + 1} (Station: ${row.station || 'N/A'}): Dropped out-of-bounds geometry [Strike/Trend: ${strVal}°, Dip/Plunge: ${dipVal}°]. Limits are 0-360° and 0-90°.`;
-                if (!analysisResults.qcWarnings) analysisResults.qcWarnings = [];
-                analysisResults.qcWarnings.push(errorMsg);
-                console.warn(errorMsg);
-                continue;
-            }
-
-            let sType = this.normalizeStructureName(row.structure);
-            let stId = row.station || `ST${i}`, dId = row.domain || 'Global', lth = row.lithology || 'Unknown';
-            
-            stSet.add(stId); domSet.add(dId);
-            if (row.lithology && row.lithology !== 'Unknown') lithSet.add(lth);
-            if (row.younging && row.younging.trim() !== '') runtimeSummary.hasYounging = true;
-
-            // Unified Structural Record Assignment Map
-            let record = { station: stId, lat, lon, domain: dId, lithology: lth, structure: sType, strike: strVal, dip: dipVal, type: "", phase: 1 };
-            
-            if (['S0', 'S1', 'S2', 'S3'].includes(sType)) {
-                record.type = "Plane";
-                let rS = ((strVal + 90) % 360) * Math.PI / 180, rD = dipVal * Math.PI / 180;
-                record.vector = [Math.sin(rD) * Math.sin(rS), Math.sin(rD) * Math.cos(rS), Math.cos(rD)];
-            } else {
-                record.type = sType.startsWith('L') ? "Lineation" : "FoldAxis";
-                let rT = strVal * Math.PI / 180, rP = dipVal * Math.PI / 180;
-                record.vector = [Math.cos(rP) * Math.sin(rT), Math.cos(rP) * Math.cos(rT), Math.sin(rP)];
-            }
-            if (record.vector[2] < 0) record.vector = record.vector.map(x => -x);
-
-            if (row.generation && !isNaN(parseInt(row.generation))) {
-                record.phase = parseInt(row.generation);
-            } else {
-                if (['S0', 'S1', 'L1', 'FA1'].includes(sType)) record.phase = 1;
-                else if (['S2', 'L2', 'FA2'].includes(sType)) record.phase = 2;
-                else if (['S3', 'L3', 'FA3'].includes(sType)) record.phase = 3;
-            }
-
-            this.initDomainSubstructures(dId);
-
-            let pIdx = record.phase;
-            if (pIdx >= 1 && pIdx <= 3) {
-                if (record.type === "Plane") {
-                    structuralDB.phases[pIdx].planar.push(record);
-                    structuralDB.domains[dId].phases[pIdx].planar.push(record);
-                    
-                    if (sType === 'S1') {
-                        structuralDB.phases[2].planar.push(record);
-                        structuralDB.domains[dId].phases[2].planar.push(record);
-                    } else if (sType === 'S2') {
-                        structuralDB.phases[3].planar.push(record);
-                        structuralDB.domains[dId].phases[3].planar.push(record);
-                    }
-                } else if (record.type === "Lineation") {
-                    structuralDB.phases[pIdx].linear.push(record);
-                    structuralDB.domains[dId].phases[pIdx].linear.push(record);
-                } else if (record.type === "FoldAxis") {
-                    structuralDB.phases[pIdx].foldAxis.push(record);
-                    structuralDB.domains[dId].phases[pIdx].foldAxis.push(record);
-                }
-            }
-            structuralDB.stations[stId] = true;
-        }
-
-        let totalRecords = 0;
-        for (let p = 1; p <= 3; p++) {
-            totalRecords += structuralDB.phases[p].linear.length + structuralDB.phases[p].foldAxis.length;
-        }
-        let distinctPlanes = new Set();
-        for (let p = 1; p <= 3; p++) {
-            structuralDB.phases[p].planar.forEach(item => distinctPlanes.add(item));
-        }
-        totalRecords += distinctPlanes.size;
-
-        runtimeSummary.stations = stSet.size;
-        runtimeSummary.measurements = totalRecords;
-        runtimeSummary.domains = [...domSet];
-        runtimeSummary.lithologies = lithSet.size > 0 ? [...lithSet] : ["Quartzite", "Schist"];
-
-        return { logs: [{ msg: `Phasor DB Active. Routed ${totalRecords} items without cross-mixing names.`, type:"pass" }] };
-    }
-};
+let rawParsedRows = []; // Intermediate placeholder between parseCSV and routeGeometry
 
 // ==========================================
-// 2. CORE MATHEMATICAL TENSOR ENGINE
+// STAGE 1: ORCHESTRATION ENGINE
+// ==========================================
+function executeSuite() {
+    parseCSV();
+    routeGeometry();
+    analyseAllPhases();
+    buildEvidence();
+    generateRecommendations(); // Invokes Stage 5 Engine
+    generateLimitations();      // Invokes Stage 6 Engine
+    compileNarrative();        // Invokes Stage 7 Engine
+    renderEverything();
+}
+
+// ==========================================
+// CORE STRUCTURAL MATH ENGINE
 // ==========================================
 const MathEngine = {
+    trendPlungeToVector(t, p) {
+        let rT = t * Math.PI / 180, rP = p * Math.PI / 180;
+        return [Math.cos(rP) * Math.sin(rT), Math.cos(rP) * Math.cos(rT), Math.sin(rP)];
+    },
+    vectorToTrendPlunge(v) {
+        let s = v[2] < 0 ? -1 : 1, x = v[0]*s, y = v[1]*s, z = v[2]*s;
+        let p = Math.asin(Math.max(-1, Math.min(1, z))) * 180 / Math.PI;
+        let t = Math.atan2(x, y) * 180 / Math.PI; return { trend: t < 0 ? t + 360 : t, plunge: p };
+    },
+    getAngle(v1, v2) {
+        return Math.acos(Math.max(-1, Math.min(1, Math.abs(v1[0]*v2[0] + v1[1]*v2[1] + v1[2]*v2[2])))) * 180 / Math.PI;
+    },
     buildOrientationTensor(subset) {
         let T = [[0,0,0], [0,0,0], [0,0,0]]; if (subset.length === 0) return T;
         subset.forEach(p => {
@@ -567,7 +470,6 @@ const MathEngine = {
         for(let i=0; i<3; i++) { for(let j=0; j<3; j++) T[i][j] /= subset.length; }
         return T;
     },
-
     solveEigenstructures(T) {
         let m = (T[0][0] + T[1][1] + T[2][2]) / 3;
         let a00 = T[0][0]-m, a11 = T[1][1]-m, a22 = T[2][2]-m, a01 = T[0][1], a02 = T[0][2], a12 = T[1][2];
@@ -590,123 +492,49 @@ const MathEngine = {
         }
         return { values: vals, vectors };
     },
-
     calculateFisherStatistics(subset) {
         if(subset.length === 0) return { meanTrend:0, meanPlunge:0, k:0, alpha95:0 };
         let R = [0,0,0]; subset.forEach(p => { for(let i=0; i<3; i++) R[i] += p.vector[i]; });
         let rLen = Math.sqrt(R[0]*R[0] + R[1]*R[1] + R[2]*R[2]);
         let meanV = R.map(x => x / rLen);
         let tp = this.vectorToTrendPlunge(meanV);
-        
         let n = subset.length;
         let k = n > 1 ? (n - 1) / (n - rLen) : 0;
         let alpha95 = (n > 1 && k > 0) ? (140 / Math.sqrt(k * n)) : 0;
-
-        return { meanTrend: tp.trend, meanPlunge: tp.plunge, k, alpha95 };
+        return { meanTrend: tp.trend, meanPlunge: tp.plunge, k, alpha95, rLength: rLen };
     },
-
-    calculateBetaAxis(subset) {
-        if (subset.length < 4) return null;
-
-        let eigen = this.solveEigenstructures(this.buildOrientationTensor(subset));
-        let s1 = eigen.values[0];
-        let s2 = eigen.values[1];
-        let s3 = eigen.values[2];
-
-        if (s3 <= 1e-5) s3 = 1e-5;
-        if (s2 <= 1e-5) s2 = 1e-5;
-
-        let ln_s1_s2 = Math.log(s1 / s2);
-        let ln_s2_s3 = Math.log(s2 / s3);
-        let C = Math.log(s1 / s3); 
-
-        let k_ratio = ln_s1_s2 / (ln_s2_s3 || 1e-5);
-
-        if (C < 0.4) return null; 
-        if (k_ratio > 2.0 && C > 1.0) return null; 
-
-        if (k_ratio <= 2.0 || (s1 > s2 && s2 > s3 * 2)) {
-            return this.vectorToTrendPlunge(eigen.vectors[2]);
-        }
-
-        return null;
-    },
-
     calculateRMS(subset, beta) {
-        if(!beta || beta.trend === undefined || beta.trend === null || beta.plunge === undefined || beta.plunge === null || subset.length === 0) {
-            return 0;
-        }
-        
+        if(!beta || subset.length === 0) return 0;
         let b = this.trendPlungeToVector(beta.trend, beta.plunge);
-        if (!b || isNaN(b[0]) || isNaN(b[1]) || isNaN(b[2])) return 0;
-        
         let sum = 0;
         subset.forEach(p => {
-            if (p && p.vector && p.vector.length >= 3) {
-                let d = Math.abs(p.vector[0]*b[0] + p.vector[1]*b[1] + p.vector[2]*b[2]);
-                let dev = Math.abs(Math.acos(Math.max(-1, Math.min(1, d))) * 180 / Math.PI - 90); 
-                sum += dev * dev;
-            }
+            let d = Math.abs(p.vector[0]*b[0] + p.vector[1]*b[1] + p.vector[2]*b[2]);
+            let dev = Math.abs(Math.acos(Math.max(-1, Math.min(1, d))) * 180 / Math.PI - 90);
+            sum += dev * dev;
         });
         return Math.sqrt(sum / subset.length);
     },
-
-    calculateBetaBootstrap(subset) {
+    calculateBootstrap(subset) {
         if (subset.length < 3) return { trend: 0, plunge: 0, ci95: 0 };
         let axes = [];
-        for (let i = 0; i < 1000; i++) {
+        for (let i = 0; i < 200; i++) {
             let sample = [];
             for (let j = 0; j < subset.length; j++) {
-                let rndIdx = Math.floor(Math.random() * subset.length);
-                sample.push(subset[rndIdx]);
+                sample.push(subset[Math.floor(Math.random() * subset.length)]);
             }
-            axes.push(this.calculateBetaAxis(sample));
+            let T = this.buildOrientationTensor(sample);
+            let eig = this.solveEigenstructures(T);
+            axes.push(this.vectorToTrendPlunge(eig.vectors[2]));
         }
         let R = [0,0,0];
-        let validCount = 0;
         axes.forEach(a => {
-            if (!a) return;
             let v = this.trendPlungeToVector(a.trend, a.plunge);
             for(let i=0; i<3; i++) R[i] += v[i];
-            validCount++;
         });
-        if (validCount === 0) return { trend: 0, plunge: 0, ci95: 0 };
         let rLen = Math.sqrt(R[0]*R[0] + R[1]*R[1] + R[2]*R[2]);
         let bMean = this.vectorToTrendPlunge(R.map(x => x / rLen));
-
-        let devAngles = axes.filter(a => a !== null).map(a => {
-            return this.getAngle(this.trendPlungeToVector(bMean.trend, bMean.plunge), this.trendPlungeToVector(a.trend, a.plunge));
-        }).sort((x, y) => x - y);
-        let ci95 = devAngles[Math.floor(devAngles.length * 0.95)] || 0;
-
-        return { trend: bMean.trend, plunge: bMean.plunge, ci95 };
-    },
-
-    calculateCylindricityFromRMS(rms) {
-        if (rms < 3) return 100;
-        if (rms < 6) return 90;
-        if (rms < 10) return 80;
-        if (rms < 15) return 70;
-        return 50;
-    },
-
-    getPlungeCharacter(p) {
-        return p < 10 ? "Nearly Horizontal" : (p < 30 ? "Gently Plunging" : (p < 60 ? "Moderately Plunging" : (p < 80 ? "Steeply Plunging" : "Nearly Vertical")));
-    },
-    getAngle(v1, v2) {
-        return Math.acos(Math.max(-1, Math.min(1, Math.abs(v1[0]*v2[0] + v1[1]*v2[1] + v1[2]*v2[2])))) * 180 / Math.PI;
-    },
-    trendPlungeToVector(t, p) {
-        let rT = t * Math.PI / 180, rP = p * Math.PI / 180;
-        return [Math.cos(rP) * Math.sin(rT), Math.cos(rP) * Math.cos(rT), Math.sin(rP)];
-    },
-    vectorToTrendPlunge(v) {
-        let s = v[2] < 0 ? -1 : 1, x = v[0]*s, y = v[1]*s, z = v[2]*s;
-        let p = Math.asin(Math.max(-1, Math.min(1, z))) * 180 / Math.PI;
-        let t = Math.atan2(x, y) * 180 / Math.PI; return { trend: t < 0 ? t + 360 : t, plunge: p };
-    },
-    formatTrendPlunge(tp) {
-        return tp ? `${Math.round(tp.trend).toString().padStart(3,'0')}/${Math.round(tp.plunge).toString().padStart(2,'0')}` : "000/00";
+        let devAngles = axes.map(a => this.getAngle(this.trendPlungeToVector(bMean.trend, bMean.plunge), this.trendPlungeToVector(a.trend, a.plunge))).sort((x, y) => x - y);
+        return { trend: bMean.trend, plunge: bMean.plunge, ci95: devAngles[Math.floor(devAngles.length * 0.95)] || 0 };
     },
     getCorrelationGrade(diff) {
         if (diff === null) return "No Data";
@@ -718,108 +546,552 @@ const MathEngine = {
 };
 
 // ==========================================
-// 3. PHASE ANALYSIS CONTROL SYSTEM
+// STAGE 2: PARSE & GEOMETRY ROUTER
 // ==========================================
-function analysePlanarGeneration(phaseDataInstance) {
-    let planarCorpus = phaseDataInstance.planar;
-    let planeMean = planarCorpus.length > 0 ? MathEngine.calculateFisherStatistics(planarCorpus) : null;
+function parseCSV() {
+    rawParsedRows = [];
+    analysisResults.qcWarnings = [];
+    const text = document.getElementById('csvInput').value;
+    const lines = text.trim().split('\n');
+    if (lines.length < 2) return;
     
-    let beta = planarCorpus.length >= 2 ? MathEngine.calculateBetaAxis(planarCorpus) : null;
+    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+    let stSet = new Set(), domSet = new Set(), lithSet = new Set();
+    runtimeSummary.hasYounging = false;
 
-    let measuredFACorpus = phaseDataInstance.foldAxis || [];
-    let faMean = measuredFACorpus.length > 0 ? MathEngine.calculateFisherStatistics(measuredFACorpus) : null;
-    
-    let faMisfit = null;
-    if (faMean && faMean.meanTrend !== undefined && faMean.meanTrend !== null && faMean.meanPlunge !== undefined && faMean.meanPlunge !== null && beta && beta.trend !== undefined && beta.trend !== null && beta.plunge !== undefined && beta.plunge !== null) {
-        faMisfit = MathEngine.getAngle(
-            MathEngine.trendPlungeToVector(beta.trend, beta.plunge), 
-            MathEngine.trendPlungeToVector(faMean.meanTrend, faMean.meanPlunge)
-        );
-    }
-    let faCorrelation = MathEngine.getCorrelationGrade(faMisfit);
-
-    let measuredLCorpus = phaseDataInstance.linear || [];
-    let lMean = measuredLCorpus.length > 0 ? MathEngine.calculateFisherStatistics(measuredLCorpus) : null;
-    
-    let lMisfit = null;
-    if (lMean && (beta || faMean)) {
-        let referenceVector = null;
-        if (faMean && faMean.meanTrend !== undefined) {
-            referenceVector = MathEngine.trendPlungeToVector(faMean.meanTrend, faMean.meanPlunge);
-        } else if (beta && beta.trend !== undefined) {
-            referenceVector = MathEngine.trendPlungeToVector(beta.trend, beta.plunge);
-        }
+    for (let i = 1; i < lines.length; i++) {
+        if (!lines[i].trim()) continue;
+        const cols = lines[i].split(',').map(c => c.trim()); 
+        let row = {};
+        headers.forEach((h, idx) => { row[h] = cols[idx]; });
         
-        if (referenceVector) {
-            lMisfit = MathEngine.getAngle(referenceVector, MathEngine.trendPlungeToVector(lMean.meanTrend, lMean.meanPlunge));
-        }
-    }
-    let lCorrelation = MathEngine.getCorrelationGrade(lMisfit);
+        let lat = parseFloat(row.latitude), lon = parseFloat(row.longitude);
+        let strVal = parseFloat(row.strike || row.trend), dipVal = parseFloat(row.dip || row.plunge);
+        if (isNaN(lat) || isNaN(lon) || isNaN(strVal) || isNaN(dipVal)) continue;
 
-    let fabricType = "Insufficient Data";
-    let interpretationText = "Structural dataset contains insufficient planar entries to compute a meaningful spatial distribution.";
+        if (strVal < 0 || strVal > 360 || dipVal < 0 || dipVal > 90) {
+            analysisResults.qcWarnings.push(`Line ${i + 1} (Station: ${row.station || 'N/A'}): Dropped out-of-bounds geometry [Strike/Trend: ${strVal}°, Dip/Plunge: ${dipVal}°].`);
+            continue;
+        }
+
+        let rawStruct = (row.structure || 'S0').toUpperCase().replace(/[\s_\-]/g, '');
+        let normStruct = 'S0';
+        if (['S0','S1','S2','S3','L1','L2','L3','FA1','FA2','FA3'].includes(rawStruct)) normStruct = rawStruct;
+        else if (['FOLDAXIS', 'FOLDAXIS1', 'FA'].includes(rawStruct)) normStruct = 'FA1';
+        else if (['FOLDAXIS2'].includes(rawStruct)) normStruct = 'FA2';
+        else if (['FOLDAXIS3'].includes(rawStruct)) normStruct = 'FA3';
+
+        let stId = row.station || `ST${i}`, dId = row.domain || 'Global', lth = row.lithology || 'Unknown';
+        stSet.add(stId); domSet.add(dId);
+        if (row.lithology && row.lithology !== 'Unknown') lithSet.add(lth);
+        if (row.younging && row.younging.trim() !== '') runtimeSummary.hasYounging = true;
+
+        rawParsedRows.push({ station: stId, lat, lon, domain: dId, lithology: lth, structure: normStruct, strike: strVal, dip: dipVal });
+    }
+    runtimeSummary.stations = stSet.size;
+    runtimeSummary.measurements = rawParsedRows.length;
+    runtimeSummary.domains = [...domSet];
+    runtimeSummary.lithologies = lithSet.size > 0 ? [...lithSet] : ["Quartzite", "Schist"];
+}
+
+function routeGeometry() {
+    // Reset structural registry
+    geometry.planar = { S0: [], S1: [], S2: [], S3: [] };
+    geometry.linear = { L1: [], L2: [], L3: [] };
+    geometry.foldAxis = { FA1: [], FA2: [], FA3: [] };
+
+    rawParsedRows.forEach(row => {
+        let rec = { ...row, type: "", vector: [0,0,0] };
+        if (['S0', 'S1', 'S2', 'S3'].includes(row.structure)) {
+            rec.type = "Plane";
+            let rS = ((row.strike + 90) % 360) * Math.PI / 180, rD = row.dip * Math.PI / 180;
+            rec.vector = [Math.sin(rD) * Math.sin(rS), Math.sin(rD) * Math.cos(rS), Math.cos(rD)];
+            if (rec.vector[2] < 0) rec.vector = rec.vector.map(x => -x);
+            geometry.planar[row.structure].push(rec);
+        } else if (['L1', 'L2', 'L3'].includes(row.structure)) {
+            rec.type = "Lineation";
+            let rT = row.strike * Math.PI / 180, rP = row.dip * Math.PI / 180;
+            rec.vector = [Math.cos(rP) * Math.sin(rT), Math.cos(rP) * Math.cos(rT), Math.sin(rP)];
+            if (rec.vector[2] < 0) rec.vector = rec.vector.map(x => -x);
+            geometry.linear[row.structure].push(rec);
+        } else if (['FA1', 'FA2', 'FA3'].includes(row.structure)) {
+            rec.type = "FoldAxis";
+            let rT = row.strike * Math.PI / 180, rP = row.dip * Math.PI / 180;
+            rec.vector = [Math.cos(rP) * Math.sin(rT), Math.cos(rP) * Math.cos(rT), Math.sin(rP)];
+            if (rec.vector[2] < 0) rec.vector = rec.vector.map(x => -x);
+            geometry.foldAxis[row.structure].push(rec);
+        }
+    });
+}
+
+// ==========================================
+// STAGE 3: PHASE ANALYSIS ENGINE
+// ==========================================
+function analyseAllPhases() {
+    analysisResults.phase["S0"] = analysePhase("S0");
+    analysisResults.phase["S1"] = analysePhase("S1");
+    analysisResults.phase["S2"] = analysePhase("S2");
+    analysisResults.phase["S3"] = analysePhase("S3");
+}
+
+function analysePhase(phaseKey) {
+    let subset = geometry.planar[phaseKey] || [];
+    let count = subset.length;
     
-    if (planarCorpus.length >= 2) {
-        if (!beta) {
-            fabricType = "Point Cluster (Non-Cylindrical)";
-            interpretationText = "Planar elements exhibit a tightly clustered, parallel fabric. The lack of dispersion prevents the calculation of a cylindrical girdle or a valid β-axis.";
+    // Default matrix frameworks
+    let tensor = [[0,0,0],[0,0,0],[0,0,0]];
+    let eigen = { values: [0,0,0], vectors: [[0,0,1],[0,0,1],[0,0,1]] };
+    let woodcock = { K: 0, C: 0, girdleIndex: 0, rLength: 0 };
+    let classification = "Insufficient Data";
+    let beta = null;
+    let bootstrap = { trend: 0, plunge: 0, ci95: 0 };
+    let rmsError = 0;
+    let cylindricity = 0;
+    let confidence = { reliability: 0, overall: "0%", quality: "Insufficient" };
+    let recs = [];
+    let lims = [];
+
+    if (count >= 2) {
+        tensor = MathEngine.buildOrientationTensor(subset);
+        eigen = MathEngine.solveEigenstructures(tensor);
+        
+        let l1 = Math.max(1e-5, eigen.values[0]);
+        let l2 = Math.max(1e-5, eigen.values[1]);
+        let l3 = Math.max(1e-5, eigen.values[2]);
+
+        woodcock.C = Math.log(l1 / l3);
+        let kDen = Math.log(l2 / l3);
+        woodcock.K = kDen > 1e-5 ? (Math.log(l1 / l2) / kDen) : 0;
+        woodcock.girdleIndex = (l1 - l3 > 1e-5) ? ((l1 - l2) / (l1 - l3)) : 0;
+        
+        let fisher = MathEngine.calculateFisherStatistics(subset);
+        woodcock.rLength = fisher.rLength;
+
+        if (woodcock.C < 0.4) {
+            classification = "Random/Isotropic Distribution";
+        } else if (woodcock.K > 2.0) {
+            classification = "Point Cluster";
+        } else if (woodcock.K < 0.4) {
+            classification = "Cylindrical Girdle Distribution";
+            beta = MathEngine.vectorToTrendPlunge(eigen.vectors[2]);
         } else {
-            fabricType = "Girdle Distribution";
-            interpretationText = `Planar data displays a systematic geometric girdle distribution. Calculated β-axis trends ${Math.round(beta.trend)}° -> ${Math.round(beta.plunge)}°.`;
+            classification = "Girdle / Planar Trend";
+            beta = MathEngine.vectorToTrendPlunge(eigen.vectors[2]);
         }
+
+        if (beta) {
+            rmsError = MathEngine.calculateRMS(subset, beta);
+            bootstrap = MathEngine.calculateBootstrap(subset);
+            cylindricity = rmsError < 3 ? 100 : (rmsError < 6 ? 90 : (rmsError < 10 ? 80 : (rmsError < 15 ? 70 : 50)));
+        }
+
+        let relScore = count >= 6 ? 85 : 60;
+        confidence = {
+            reliability: relScore,
+            overall: `${relScore}%`,
+            quality: relScore >= 75 ? "Good" : "Moderate",
+            rms: rmsError,
+            cylindricity: cylindricity,
+            fisherK: fisher.k
+        };
+    } else {
+        if (count === 1) lims.push({ priority: 1, category: "Phase Engine", text: `Phase ${phaseKey} has only 1 data point; statistics cannot be compiled.` });
     }
 
-    let eigenData = MathEngine.solveEigenstructures(MathEngine.buildOrientationTensor(phaseDataInstance.planar));
-    let rmsError = beta ? MathEngine.calculateRMS(phaseDataInstance.planar, beta) : 0;
-    let suitabilityScore = planarCorpus.length >= 6 ? 85 : 60;
-    let bootstrapData = beta ? MathEngine.calculateBetaBootstrap(phaseDataInstance.planar) : null;
-
-    return {
-        phase: `Phase ${phaseDataInstance.phase}`,
-        dataCount: planarCorpus.length,
-        eigen: eigenData,
-        beta: beta,
-        rms: rmsError,
-        reliability: suitabilityScore,
-        bootstrap: bootstrapData,
-        cylindricity: MathEngine.calculateCylindricityFromRMS(rmsError),
-        fisher: planeMean || { k: 0 },
-        faMean: faMean,
-        lMean: lMean,
-        measuredFA: measuredFACorpus.length,
-        measuredL: measuredLCorpus.length,
-        faMisfit: faMisfit,
-        faCorrelation: faCorrelation,
-        lMisfit: lMisfit,
-        lCorrelation: lCorrelation,
-        evidence: [faCorrelation === 'Excellent' || faCorrelation === 'Good' ? 'Field Verified' : 'Tensor Prediction'],
-        diagnostics: {
-            fabricType: fabricType,
-            interpretation: interpretationText
+    // Structural Profile Explanations
+    let narrative = { summary: "", interpretation: "", diagnosis: "" };
+    if (count >= 2) {
+        narrative.summary = `${phaseKey} analysis computed across ${count} stations with structural fabric thickness C = ${woodcock.C.toFixed(2)}.`;
+        if (classification === "Cylindrical Girdle Distribution") {
+            narrative.interpretation = `The planar elements display systematic rotational variance defining a coherent structural profile.`;
+            narrative.diagnosis = `Active cylindrical dispersion identifies an un-mixed fold architecture tracking along hinge point ${MathEngine.vectorToTrendPlunge(eigen.vectors[2]).trend.toFixed(0)}°.`;
+        } else if (classification === "Point Cluster") {
+            narrative.interpretation = `The dataset profiles as a uniform orientation block, mapping either a structural limb or homoclinal unit.`;
+            narrative.diagnosis = `Data clustering restricts local beta extraction. Spatial girdle coverage is inadequate.`;
+        } else {
+            narrative.interpretation = `Planar distribution traces a broad trend with intermediate axial dispersion constraints.`;
+            narrative.diagnosis = `Deformation properties match multi-phase overlap features or non-cylindrical configurations.`;
         }
+    } else {
+        narrative.summary = `Phase ${phaseKey} contains insufficient tracking records.`;
+    }
+
+    return { tensor, eigen, woodcock, classification, beta, bootstrap, confidence, recommendations: recs, limitations: lims, narrative };
+}
+
+// ==========================================
+// STAGE 4: INTER-FABRIC EVIDENCE ENGINE
+// ==========================================
+function buildEvidence() {
+    let matches = [];
+    
+    // Cross-validation checks
+    const structuralPairs = [
+        { betaPhase: "S0", fieldFA: "FA1", label: "β(S0) vs FA1" },
+        { betaPhase: "S1", fieldFA: "FA2", label: "β(S1) vs FA2" },
+        { betaPhase: "S2", fieldFA: "FA3", label: "β(S2) vs FA3" }
+    ];
+
+    structuralPairs.forEach(pair => {
+        let bData = analysisResults.phase[pair.betaPhase]?.beta;
+        let faSubset = geometry.foldAxis[pair.fieldFA] || [];
+        
+        let misfit = null, grade = "No Data";
+        if (bData && faSubset.length > 0) {
+            let faStats = MathEngine.calculateFisherStatistics(faSubset);
+            let vB = MathEngine.trendPlungeToVector(bData.trend, bData.plunge);
+            let vFA = MathEngine.trendPlungeToVector(faStats.meanTrend, faStats.meanPlunge);
+            misfit = MathEngine.getAngle(vB, vFA);
+            grade = MathEngine.getCorrelationGrade(misfit);
+        }
+        matches.push({ type: "Beta-FA", label: pair.label, misfit, grade, count: faSubset.length });
+    });
+
+    const linearPairs = [
+        { linKey: "L1", betaPhase: "S0", label: "L1 vs β(S0)" },
+        { linKey: "L2", betaPhase: "S1", label: "L2 vs β(S1)" },
+        { linKey: "L3", betaPhase: "S2", label: "L3 vs β(S2)" }
+    ];
+
+    linearPairs.forEach(pair => {
+        let lSubset = geometry.linear[pair.linKey] || [];
+        let bData = analysisResults.phase[pair.betaPhase]?.beta;
+
+        let misfit = null, grade = "No Data";
+        if (bData && lSubset.length > 0) {
+            let lStats = MathEngine.calculateFisherStatistics(lSubset);
+            let vB = MathEngine.trendPlungeToVector(bData.trend, bData.plunge);
+            let vL = MathEngine.trendPlungeToVector(lStats.meanTrend, lStats.meanPlunge);
+            misfit = MathEngine.getAngle(vB, vL);
+            grade = MathEngine.getCorrelationGrade(misfit);
+        }
+        matches.push({ type: "Linear-Beta", label: pair.label, misfit, grade, count: lSubset.length });
+    });
+
+    // Score evaluation framework
+    let validChecks = matches.filter(m => m.grade !== "No Data");
+    let excellentChecks = validChecks.filter(m => m.grade === "Excellent" || m.grade === "Good");
+    let score = validChecks.length > 0 ? Math.round((excellentChecks.length / validChecks.length) * 100) : 70;
+
+    analysisResults.evidence = {
+        evidenceScore: `${score}%`,
+        reliability: score >= 75 ? "High Stability" : "Provisional Matrix",
+        confidence: score >= 70 ? "Good Structural Consistency" : "Review Inter-Fabric Misfits",
+        table: matches
     };
 }
+
+// ==========================================
+// STAGE 5: OBJECT-BASED RECOMMENDATION ENGINE
+// ==========================================
+function generateRecommendations() {
+    analysisResults.recommendations = [];
     
-function executeStructuralSynthesisPipeline() {
-    for (let p = 1; p <= 3; p++) {
-        let pData = structuralDB.phases[p];
-        if (pData.planar.length < 3) continue;
-        analysisResults.global[`F${p}`] = analysePlanarGeneration(pData);
+    const targetChecks = [
+        { pk: "S0", fk: "FA1", lk: "L1", suffix: "1" },
+        { pk: "S1", fk: "FA2", lk: "L2", suffix: "2" },
+        { pk: "S2", fk: "FA3", lk: "L3", suffix: "3" }
+    ];
+
+    targetChecks.forEach(c => {
+        let pCount = (geometry.planar[c.pk] || []).length;
+        let faCount = (geometry.foldAxis[c.fk] || []).length;
+        let lCount = (geometry.linear[c.lk] || []).length;
+
+        if (pCount > 0 && pCount < 5) {
+            analysisResults.recommendations.push({
+                priority: 1,
+                category: "Structural Density",
+                text: `Acquire additional structural data allocations for ${c.pk} (currently ${pCount}) to solidify beta hinge configurations.`
+            });
+        }
+        if (pCount >= 3 && faCount === 0) {
+            analysisResults.recommendations.push({
+                priority: 1,
+                category: "Field Validation",
+                text: `Locate and record physical fold hinge components (${c.fk}) to independently verify the calculated &beta;(${c.pk}) projection.`
+            });
+        }
+        if (pCount >= 3 && lCount === 0) {
+            analysisResults.recommendations.push({
+                priority: 2,
+                category: "Kinematics",
+                text: `Map out matching lineation structural networks (${c.lk}) to cross-check strain kinematics with phase rotation paths.`
+            });
+        }
+    });
+
+    if (runtimeSummary.domains.length <= 1) {
+        analysisResults.recommendations.push({
+            priority: 2,
+            category: "Domain Partitioning",
+            text: "Data tracking is clustered globally. Expand structural survey footprints into alternative zones to screen for regional hinge rotations."
+        });
+    }
+    if (!runtimeSummary.hasYounging) {
+        analysisResults.recommendations.push({
+            priority: 2,
+            category: "Facing Indicators",
+            text: "Incorporate primary sedimentary or volcanic facing structures to verify structural vergence and locate overturned panels."
+        });
     }
 
-    for (const domain in structuralDB.domains) {
-        analysisResults.domains[domain] = {};
-        let domDB = structuralDB.domains[domain];
-        for (let p = 1; p <= 3; p++) {
-            let pData = domDB.phases[p];
-            if (pData.planar.length < 3) continue;
-            analysisResults.domains[domain][`F${p}`] = analysePlanarGeneration(pData);
-        }
+    if (analysisResults.recommendations.length === 0) {
+        analysisResults.recommendations.push({ priority: 3, category: "Quality Assessment", text: "Database meets all geometric logging parameters. Continue regional trace verification." });
     }
 }
 
 // ==========================================
-// 4. VISUALIZATION & MAPS GRAPHICS INTERFACE
+// STAGE 6: OBJECT-BASED LIMITATION ENGINE
+// ==========================================
+function generateLimitations() {
+    analysisResults.limitations = [];
+
+    for (const phaseKey in analysisResults.phase) {
+        const pData = analysisResults.phase[phaseKey];
+        if (!pData) continue;
+
+        let pCount = (geometry.planar[phaseKey] || []).length;
+        if (pCount > 0 && pCount < 4) {
+            analysisResults.limitations.push({
+                priority: 1,
+                category: "Sample Deficiency",
+                text: `Phase ${phaseKey} calculations use low density markers (n=${pCount}). High risk of structural sampling bias.`
+            });
+        }
+        if (pData.classification === "Point Cluster") {
+            analysisResults.limitations.push({
+                priority: 1,
+                category: "Geometric Dispersion Gap",
+                text: `Planar fabric ${phaseKey} maps as a single cluster profile; structural beta generation cannot calculate rotational properties.`
+            });
+        }
+        if (pData.bootstrap && pData.bootstrap.ci95 > 20) {
+            analysisResults.limitations.push({
+                priority: 2,
+                category: "Tensor Variance instability",
+                text: `Phase ${phaseKey} bootstrap evaluation contains an wide dispersion path (&plusmn;${pData.bootstrap.ci95.toFixed(1)}°), signaling irregular geometry.`
+            });
+        }
+    }
+
+    if (runtimeSummary.stations < 8) {
+        analysisResults.limitations.push({
+            priority: 2,
+            category: "Spatial Gaps",
+            text: `Field report generated from only ${runtimeSummary.stations} active stations. Risk of localized over-interpretation.`
+        });
+    }
+}
+
+// ==========================================
+// STAGE 7: NARRATIVE MATRIX COMPILER
+// ==========================================
+function compileNarrative() {
+    let pKey = "S0";
+    if (!geometry.planar[pKey] || geometry.planar[pKey].length < 2) {
+        let valid = Object.keys(analysisResults.phase).find(k => analysisResults.phase[k] && (geometry.planar[k] || []).length >= 2);
+        if (valid) pKey = valid;
+    }
+    
+    let active = analysisResults.phase[pKey];
+    if (!active || active.classification === "Insufficient Data") {
+        analysisResults.narrative = {
+            summary: "Structural analysis suspended.",
+            interpretation: "Data imports do not provide enough planar dispersion matching operational minimum configurations.",
+            diagnosis: "Database needs further baseline structural entry configurations."
+        };
+        return;
+    }
+
+    let summaryText = `Regional fabric summary tracks data distributions mapped across ${runtimeSummary.stations} field stations. Primary fabric analysis uses ${pKey} surfaces, yielding a ${active.classification} classification.`;
+    let interText = `Tensor profiling registers a fabric density constraint metric of C = ${active.woodcock.C.toFixed(2)} and shape component K = ${active.woodcock.K.toFixed(2)}. This matches structural patterns observed across ${runtimeSummary.domains.join(', ')} domains.`;
+    
+    let diagText = "";
+    if (active.beta) {
+        diagText = `Calculated beta axis projects along trajectory ${Math.round(active.beta.trend).toString().padStart(3,'0')}°/${Math.round(active.beta.plunge).toString().padStart(2,'0')}°. Kinematic parameters indicate a ${MathEngine.getPlungeCharacter(active.beta.plunge)} profile configuration.`;
+    } else {
+        diagText = "Lack of planar variance implies a single homoclinal panel or tightly appressed, parallel fold domain lines.";
+    }
+
+    analysisResults.narrative = { summary: summaryText, interpretation: interText, diagnosis: diagText };
+}
+
+// ==========================================
+// STAGE 8: ISOLATED RENDERING LAYER
+// ==========================================
+function renderEverything() {
+    // 1. Dashboard Totals Card Elements
+    document.getElementById('inv-stations').innerText = runtimeSummary.stations;
+    document.getElementById('inv-total').innerText = runtimeSummary.measurements;
+    document.getElementById('inv-domains').innerText = runtimeSummary.domains.length;
+    document.getElementById('inv-litho').innerText = runtimeSummary.lithologies.length;
+
+    document.getElementById('inv-s0').innerText = (geometry.planar.S0 || []).length;
+    document.getElementById('inv-s1').innerText = (geometry.planar.S1 || []).length;
+    document.getElementById('inv-s2').innerText = (geometry.planar.S2 || []).length;
+    document.getElementById('inv-s3').innerText = (geometry.planar.S3 || []).length;
+
+    document.getElementById('inv-l1').innerText = (geometry.linear.L1 || []).length;
+    document.getElementById('inv-l2').innerText = (geometry.linear.L2 || []).length;
+    document.getElementById('inv-l3').innerText = (geometry.linear.L3 || []).length;
+    document.getElementById('inv-fa').innerText = ((geometry.foldAxis.FA1 || []).length + (geometry.foldAxis.FA2 || []).length + (geometry.foldAxis.FA3 || []).length);
+
+    // 2. Average Bedding Structural Statistics Table
+    let s0List = geometry.planar.S0 || [];
+    let geoStatsHtml = "";
+    if (s0List.length > 0) {
+        let dips = s0List.map(p => p.dip), avg = dips.reduce((a,b)=>a+b,0)/dips.length;
+        geoStatsHtml = `<table>
+            <tr><th>Avg Bedding Dip</th><td>${avg.toFixed(0)}°</td></tr>
+            <tr><th>Min/Max Dip</th><td>${Math.min(...dips)}° / ${Math.max(...dips)}°</td></tr>
+        </table>`;
+    } else {
+        geoStatsHtml = "<div style='font-size:12px; color:var(--text-muted); padding:8px;'>No S₀ bedding elements recorded.</div>";
+    }
+    document.getElementById('geoStatisticsContainer').innerHTML = geoStatsHtml;
+
+    // 3. Main Dashboard Overview Parameters
+    let pKey = analysisResults.phase.S0?.beta ? "S0" : (analysisResults.phase.S1?.beta ? "S1" : null);
+    if (!pKey) pKey = Object.keys(analysisResults.phase).find(k => analysisResults.phase[k]?.beta) || "S0";
+    let mainPhase = analysisResults.phase[pKey];
+
+    if (mainPhase && mainPhase.beta) {
+        document.getElementById('card-trend-plunge').innerHTML = `Trend: ${Math.round(mainPhase.beta.trend).toString().padStart(3,'0')}°<br>Plunge: ${Math.round(mainPhase.beta.plunge).toString().padStart(2,'0')}°`;
+        document.getElementById('card-cyl-val').innerText = `${mainPhase.confidence.cylindricity}%`;
+        document.getElementById('card-cyl-profile').innerText = `RMS ${mainPhase.confidence.rms.toFixed(2)}° Residual`;
+        document.getElementById('card-character').innerText = MathEngine.getPlungeCharacter(mainPhase.beta.plunge);
+        document.getElementById('conf-overall').innerText = mainPhase.confidence.overall;
+        document.getElementById('conf-stars').innerText = mainPhase.confidence.reliability >= 75 ? "★★★★★" : "★★★☆☆";
+    } else {
+        document.getElementById('card-trend-plunge').innerHTML = `<span style="color:#dc2626; font-size:13px; font-weight:700;">No Beta Axis</span>`;
+        document.getElementById('card-cyl-val').innerText = "N/A";
+        document.getElementById('card-cyl-profile').innerText = "Non-Girdle Dispersion Block";
+        document.getElementById('card-character').innerText = "Planar Cluster / Random";
+        document.getElementById('conf-overall').innerText = "0%";
+        document.getElementById('conf-stars').innerText = "☆☆☆☆☆";
+    }
+
+    if (analysisResults.evidence) {
+        document.getElementById('conf-quality').innerText = mainPhase?.confidence?.quality || "Insufficient";
+        document.getElementById('conf-verification').innerText = `Matrix Quality: ${analysisResults.evidence.reliability} (${analysisResults.evidence.confidence})`;
+    }
+
+    // 4. Orientation Tensor Component Output Rendering
+    let tensorHtml = "";
+    for (const pk in analysisResults.phase) {
+        let pData = analysisResults.phase[pk];
+        if (!pData || (geometry.planar[pk] || []).length === 0) continue;
+        tensorHtml += `
+        <div style="font-size:13px; font-weight:700; margin-top:12px; color:#1e293b;">Phase ${pk} Tensor Metrics</div>
+        <table>
+            <tr><th>&lambda;₁ (Dominant Axis Vector)</th><td>${pData.eigen.values[0].toFixed(4)}</td></tr>
+            <tr><th>&lambda;₂ (Intermediate Axis Vector)</th><td>${pData.eigen.values[1].toFixed(4)}</td></tr>
+            <tr><th>&lambda;₃ (Minor Axis Vector)</th><td>${pData.eigen.values[2].toFixed(4)}</td></tr>
+            <tr style="border-top:1px dashed #cbd5e1;"><th>Woodcock Structural Shape (K)</th><td>${pData.woodcock.K.toFixed(3)}</td></tr>
+            <tr><th>Fabric Intensity Strength (C)</th><td>${pData.woodcock.C.toFixed(3)}</td></tr>
+            <tr style="background:#f8fafc; font-weight:bold;"><th>Fabric Distribution Style</th><td>${pData.classification}</td></tr>
+        </table>`;
+    }
+    document.getElementById('tensorContainer').innerHTML = tensorHtml || "<div style='font-size:12px; padding:8px;'>No tensor data compiled.</div>";
+
+    // 5. Fold Geometry Profile Calculations
+    let foldHtml = "";
+    for (const pk in analysisResults.phase) {
+        let pData = analysisResults.phase[pk];
+        if (!pData || (geometry.planar[pk] || []).length === 0) continue;
+        let bStr = pData.beta ? `${Math.round(pData.beta.trend).toString().padStart(3,'0')}°/${Math.round(pData.beta.plunge).toString().padStart(2,'0')}°` : "N/A";
+        let bootStr = (pData.beta && pData.bootstrap.ci95 > 0) ? `&plusmn;${pData.bootstrap.ci95.toFixed(1)}°` : "N/A";
+        foldHtml += `
+        <div style="font-size:13px; font-weight:700; margin-top:12px; color:#1e293b;">Phase ${pk} Fold Profiling</div>
+        <table>
+            <tr><th>Calculated Lineation &beta;-axis</th><td><strong>${bStr}</strong></td></tr>
+            <tr><th>95% Bootstrap Cone Limit</th><td>${bootStr}</td></tr>
+            <tr><th>Cylindricity Structural Fit Index</th><td>${pData.beta ? pData.confidence.cylindricity + '%' : 'N/A'}</td></tr>
+            <tr><th>Fisher Concentration Factor (k)</th><td>${pData.confidence.fisherK ? pData.confidence.fisherK.toFixed(1) : '0.0'}</td></tr>
+        </table>`;
+    }
+    document.getElementById('foldGeometryContainer').innerHTML = foldHtml || "<div style='font-size:12px; padding:8px;'>No fold profiles compiled.</div>";
+
+    // 6. Cross-Fabric Evidence Multi-Matrix Table
+    let tableHtml = `
+    <table>
+        <thead>
+            <tr>
+                <th>Kinematic System Link</th>
+                <th>Calculated Beta Coordinate</th>
+                <th>Field Object Component</th>
+                <th>Calculated Misfit Angle</th>
+                <th>Evaluation Matrix Grade</th>
+            </tr>
+        </thead>
+        <tbody>`;
+    if (analysisResults.evidence && analysisResults.evidence.table) {
+        analysisResults.evidence.table.forEach(row => {
+            let misfitDisplay = row.misfit !== null ? `${row.misfit.toFixed(1)}°` : "--";
+            tableHtml += `<tr>
+                <td><strong>${row.label}</strong></td>
+                <td>Verified Output Target</td>
+                <td>Observations Counted (n=${row.count})</td>
+                <td><span class="badge">${misfitDisplay}</span></td>
+                <td><strong>${row.grade}</strong></td>
+            </tr>`;
+        });
+    }
+    tableHtml += `</tbody></table>`;
+    document.getElementById('correlationContainer').innerHTML = tableHtml;
+
+    // 7. Structural Field Narrative Assembly
+    if (analysisResults.narrative) {
+        document.getElementById('interpretationContainer').innerHTML = `
+        <div class="interpretation-box">
+            <strong>System Summary Profile:</strong> ${analysisResults.narrative.summary}<br><br>
+            <strong>Fabric Layout Interpretation:</strong> ${analysisResults.narrative.interpretation}
+        </div>
+        <div class="diagnosis-banner">
+            <h4>Tectonic Synthesis Diagnosis Matrix</h4>
+            <p style="font-size:13px; line-height:1.6; margin:0;">${analysisResults.narrative.diagnosis}</p>
+        </div>`;
+    }
+
+    // 8. Dynamic Recommendations Verification Matrix Checklist
+    let chkHtml = "";
+    analysisResults.recommendations.forEach(r => {
+        chkHtml += `
+        <div class="checklist-item">
+            <input type="checkbox">
+            <div><span style="font-weight:700; text-transform:uppercase; font-size:11px; color:var(--secondary);">[${r.category}]</span> ${r.text}</div>
+        </div>`;
+    });
+    document.getElementById('checklistContainer').innerHTML = chkHtml || "<div style='font-size:12px; padding:8px;'>All verification steps clear.</div>";
+
+    // 9. Analytical Mapping Limitations & Verification Warning Block
+    let limHtml = "<ul style='padding-left:20px; font-size:13px; line-height:1.6;'>";
+    analysisResults.limitations.forEach(l => {
+        limHtml += `<li style='margin-bottom:6px;'><strong>[${l.category}]</strong> ${l.text}</li>`;
+    });
+    limHtml += "</ul>";
+    limHtml += `
+    <div class="caution-box">
+        <strong>Field Constraints Interpretation Warning notice:</strong><br>
+        Calculated beta axes constitute mathematical projection configurations derived solely from imported orientation subsets. Dynamic processing loops operate offline without verifying raw structural topographic boundaries or younging profiles. Cross-check all models with localized spatial mappings.
+    </div>`;
+    document.getElementById('limitationsContainer').innerHTML = limHtml;
+
+    // 10. Technical Quality Logs Stream
+    let qcH封闭 = "";
+    if (analysisResults.qcWarnings.length > 0) {
+        analysisResults.qcWarnings.forEach(w => {
+            qcH封闭 += `<div class="qc-item qc-warn">${w}</div>`;
+        });
+    } else {
+        qcH封闭 = `<div class="qc-item qc-pass">Orientation tensor integrity constraints passed. Data boundaries fit valid structural calculation ranges.</div>`;
+    }
+    document.getElementById('qcLogs').innerHTML = qcH封闭;
+}
+
+// ==========================================
+// VISUAL GRAPHICS RENDERING CANVAS BACKEND
 // ==========================================
 const VisualizationEngine = {
     render() {
@@ -831,15 +1103,14 @@ const VisualizationEngine = {
         ctx.beginPath(); ctx.moveTo(cx, cy-r); ctx.lineTo(cx, cy+r); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(cx-r, cy); ctx.lineTo(cx+r, cy); ctx.stroke();
 
-        let allRecords = [];
-        for (let p = 1; p <= 3; p++) {
-            allRecords = allRecords.concat(structuralDB.phases[p].planar);
-            allRecords = allRecords.concat(structuralDB.phases[p].linear);
-            allRecords = allRecords.concat(structuralDB.phases[p].foldAxis);
-        }
+        let keys = [...Object.keys(geometry.planar), ...Object.keys(geometry.linear), ...Object.keys(geometry.foldAxis)];
+        let items = [];
+        keys.forEach(k => {
+            let group = geometry.planar[k] || geometry.linear[k] || geometry.foldAxis[k] || [];
+            items = items.concat(group);
+        });
 
-        let uniqueRecords = Array.from(new Set(allRecords));
-        uniqueRecords.forEach(p => {
+        items.forEach(p => {
             let [nx, ny, nz] = p.vector;
             let f = Math.sqrt(1 / (1 + Math.abs(nz)));
             let cfg = symbolsConfig[p.structure] || { char: '●', color: '#0f172a' };
@@ -853,11 +1124,11 @@ const VisualizationEngine = {
             mCtx.beginPath(); mCtx.moveTo(g, 0); mCtx.lineTo(g, 300); mCtx.stroke();
             mCtx.beginPath(); mCtx.moveTo(0, g); mCtx.lineTo(300, g); mCtx.stroke();
         }
-        if (uniqueRecords.length === 0) return;
-        let lats = uniqueRecords.map(p => p.lat), lons = uniqueRecords.map(p => p.lon);
+        if (items.length === 0) return;
+        let lats = items.map(p => p.lat), lons = items.map(p => p.lon);
         let minLa = Math.min(...lats), maxLa = Math.max(...lats), minLo = Math.min(...lons), maxLo = Math.max(...lons);
         let printed = new Set();
-        uniqueRecords.forEach(p => {
+        items.forEach(p => {
             let x = 40 + ((p.lon - minLo) / (maxLo - minLo || 1)) * 220, y = 260 - ((p.lat - minLa) / (maxLa - minLa || 1)) * 220;
             if (printed.has(p.station + p.structure)) return; printed.add(p.station + p.structure);
             mCtx.fillStyle = (symbolsConfig[p.structure] || { color: '#0f172a' }).color;
@@ -867,415 +1138,16 @@ const VisualizationEngine = {
     }
 };
 
-function displayDatasetCounts() {
-    document.getElementById('inv-stations').innerText = runtimeSummary.stations;
-    document.getElementById('inv-total').innerText = runtimeSummary.measurements;
-    document.getElementById('inv-domains').innerText = runtimeSummary.domains.length;
-    document.getElementById('inv-litho').innerText = runtimeSummary.lithologies.length;
-
-    let allPlanes = [];
-    for(let p=1; p<=3; p++) allPlanes = allPlanes.concat(structuralDB.phases[p].planar);
-    let uPlanes = Array.from(new Set(allPlanes));
-
-    document.getElementById('inv-s0').innerText = uPlanes.filter(p => p.structure === 'S0').length;
-    document.getElementById('inv-s1').innerText = uPlanes.filter(p => p.structure === 'S1').length;
-    document.getElementById('inv-s2').innerText = uPlanes.filter(p => p.structure === 'S2').length;
-    document.getElementById('inv-s3').innerText = uPlanes.filter(p => p.structure === 'S3').length;
-
-    let l1=0, l2=0, l3=0, fa1=0, fa2=0, fa3=0;
-    for(let p=1; p<=3; p++) {
-        structuralDB.phases[p].linear.forEach(l => { if(l.structure==='L1')l1++; if(l.structure==='L2')l2++; if(l.structure==='L3')l3++; });
-        structuralDB.phases[p].foldAxis.forEach(f => { if(f.structure==='FA1')fa1++; if(f.structure==='FA2')fa2++; if(f.structure==='FA3')fa3++; });
-    }
-
-    document.getElementById('inv-l1').innerText = l1;
-    document.getElementById('inv-l2').innerText = l2;
-    document.getElementById('inv-l3').innerText = l3;
-    document.getElementById('inv-fa').innerText = (fa1 + fa2 + fa3);
-
-    const s0S = uPlanes.filter(p => p.structure === 'S0');
-    if (s0S.length > 0) {
-        let dips = s0S.map(p => p.dip), avg = dips.reduce((a,b)=>a+b,0)/dips.length;
-        document.getElementById('geoStatisticsContainer').innerHTML = `<table><tr><th>Avg Bedding Dip</th><td>${avg.toFixed(0)}°</td></tr><tr><th>Min/Max Dip</th><td>${Math.min(...dips)}° / ${Math.max(...dips)}°</td></tr></table>`;
-    }
-}
-
-function getFabricInterpretation(fabricClass, stats = {}) {
-    const { 
-        lambda1 = null, 
-        lambda2 = null, 
-        lambda3 = null, 
-        woodcockK = null, 
-        woodcockC = null,
-        rms = null,
-        suitability = null 
-    } = stats;
-
-    let notes = [];
-    if (woodcockK !== null && woodcockK < 0.2) notes.push("Low Woodcock K indicates a strongly girdle-dominated fabric.");
-    if (woodcockK !== null && woodcockK > 5) notes.push("High Woodcock K indicates a strongly clustered orientation fabric.");
-    if (rms !== null && rms < 5) notes.push("Excellent cylindrical fit.");
-    if (rms !== null && rms >= 5 && rms < 12) notes.push("Moderate cylindrical consistency.");
-    if (rms !== null && rms >= 12) notes.push("High residual dispersion suggests non-cylindrical deformation.");
-
-    const additionalNotesStr = notes.length > 0 ? notes.join(" ") : "Fabric parameters track within normal baseline variance limits.";
-
-    switch (fabricClass) {
-        case "Point Cluster":
-            return {
-                title: "Point Cluster",
-                interpretation: "The poles form a concentrated population indicating either a single structural limb or a homogeneous regional foliation.",
-                geologicalMeaning: "The structural fabric represents one dominant orientation rather than a folded surface.",
-                foldAxis: "β-axis computation suppressed.",
-                recommendation: "Collect measurements across both fold limbs or additional structural domains.",
-                additionalNotes: additionalNotesStr
-            };
-        case "Cylindrical Girdle Distribution":
-        case "Girdle Distribution":
-        case "Girdle / Planar Trend":
-            let calculatedIg = (lambda1 && (lambda1 - lambda3 > 1e-5)) ? ((lambda1 - lambda2) / (lambda1 - lambda3)) : 0;
-            return {
-                title: "Cylindrical Girdle Distribution",
-                interpretation: `The poles define a continuous great-circle girdle (Ig: ${calculatedIg.toFixed(3)}), indicating systematic rotation of planar surfaces around a common fold hinge.`,
-                geologicalMeaning: "The dataset contains sufficient rotational dispersion to confidently isolate a stable statistical beta-axis.",
-                foldAxis: "Beta-axis calculated directly from the structural tensor orientation matrix.",
-                recommendation: "Compare the calculated beta-axis with mapped field hinges (FA) and associated linear kinematic fabrics (L).",
-                additionalNotes: additionalNotesStr
-            };
-        default:
-            return {
-                title: "Random/Isotropic Distribution",
-                interpretation: `The poles are widely dispersed without any statistically significant preferred orientation.`,
-                geologicalMeaning: "The dataset probably combines unrelated structural events, or contains random background tracking noise.",
-                foldAxis: "Not calculated.",
-                recommendation: "Partition the master dataset into localized structural sub-domains.",
-                additionalNotes: additionalNotesStr
-            };
-    }
-}   
-
-// ==========================================
-// 5. NARRATIVE GENERATION & REPORT COMPILER
-// ==========================================
-function buildNarrative(model) {
-    let structuralInsight = "";
-    let dynamicsAesthetic = "normal";
-
-    if (model.woodcockK > 2.0) {
-        structuralInsight = `The structural dataset reflects a highly localized axial strain field. This tightly bound spatial orientation typically highlights primary hinge zones or deep-seated tectonic shortening directions.`;
-        dynamicsAesthetic = "accent-critical";
-    } else if (model.woodcockK < 0.4) {
-        structuralInsight = `The calculated tensor profile establishes a cylindrical profile mapping. This suggests regional overprinting or representative cylindrical folding distributions common in polyphase deformation domains.`;
-        dynamicsAesthetic = "accent-girdle";
-    } else {
-        structuralInsight = `The geometric dispersion indicates distributed planar fabric tendencies, pointing toward complex fold-limb geometries or localized structural variations.`;
-    }
-
-    return {
-        title: `${model.phaseName} Synthesis Narrative`,
-        classification: model.classificationTitle,
-        insightText: structuralInsight,
-        strengthSummary: `Fabric structural intensity parameter (Woodcock C) parses at ${model.woodcockC.toFixed(2)}, indicating a data dispersion weight profile matching ${model.sampleCount} recorded stations.`,
-        styleHook: dynamicsAesthetic
-    };
-}
-
-function buildLimitations() {
-    const limitations = [];
-
-    for (const pKey in analysisResults.global) {
-        const r = analysisResults.global[pKey];
-        if (!r) continue;
-
-        if (!r.beta) {
-            limitations.push(`Phase ${r.phase || pKey}: The planar fabric forms a single point-cluster or dispersed population. The available orientations do not define a statistically meaningful β-axis.`);
-            continue;
-        }
-
-        if (r.beta && !r.faMean) {
-            limitations.push(`Phase ${r.phase || pKey}: No measured fold hinge (FA${r.phase || pKey}) was supplied. The calculated β-axis therefore remains an analytical prediction requiring field verification.`);
-        }
-
-        if (r.beta && r.bootstrap && typeof r.bootstrap.ci95 === "number" && r.bootstrap.ci95 > 20) {
-            limitations.push(`Phase ${r.phase || pKey}: Bootstrap confidence interval is broad (95% cone = ${r.bootstrap.ci95.toFixed(1)}°), indicating elevated orientation variability within this deformation phase.`);
-        }
-    }
-
-    const totalStations = runtimeSummary.stations || 0;
-    if (totalStations < 10) {
-        limitations.push(`Only ${totalStations} structural stations were analysed. Additional stations are recommended before extrapolating regional fold geometry.`);
-    }
-
-    const totalDomains = (runtimeSummary.domains || []).length;
-    if (totalDomains <= 1) {
-        limitations.push(`Measurements originate from a single mapped structural domain. Regional extrapolation should therefore be made with caution until adjacent domains are investigated.`);
-    }
-
-    if (limitations.length === 0) {
-        limitations.push("No significant analytical limitations were identified. The imported structural dataset satisfies the current quality criteria for statistical fold analysis.");
-    }
-
-    let limHtml = `<ul style="padding-left:20px; font-size:13px; margin:0 0 10px 0; line-height:1.6;">`;
-    limitations.forEach(item => {
-        limHtml += `<li style="margin-bottom:6px;">${item}</li>`;
-    });
-    limHtml += `</ul>
-    <div class="caution-box" style="background:#fef2f2; border-left:4px solid #dc2626; padding:10px; font-size:12px; color:#7f1d1d; border-radius:5px;">
-    <strong>Interpretation Notice</strong><br>
-    Calculated β-axes represent statistically derived fold-axis estimates based on imported planar orientations. Geological interpretation should always be integrated with field observations, mapped hinge traces, younging criteria, and independent structural evidence before regional tectonic conclusions are drawn.
-    </div>`;
-
-    const limCont = document.getElementById("limitationsContainer") || document.getElementById("analysisNotesContainer") || document.getElementById("analysisNotes");
-    if (limCont) {
-        limCont.innerHTML = limHtml;
-    }
-}
-
-function buildStructuralReportingSuites() {
-    const tC = document.getElementById('tensorContainer'), fC = document.getElementById('foldGeometryContainer');
-    if (tC) tC.innerHTML = ""; 
-    if (fC) fC.innerHTML = "";
-
-    let primaryKey = analysisResults.global.F1 ? "F1" : (analysisResults.global.F2 ? "F2" : null);
-    if (!primaryKey && Object.keys(analysisResults.global).length > 0) primaryKey = Object.keys(analysisResults.global)[0];
-    
-    if (!primaryKey || !analysisResults.global[primaryKey]) {
-        if (document.getElementById('card-trend-plunge')) document.getElementById('card-trend-plunge').innerHTML = `<span style="color:var(--warning)">Insufficient Data</span>`;
-        if (document.getElementById('conf-overall')) document.getElementById('conf-overall').innerText = "0%";
-        return;
-    }
-    let mainReport = analysisResults.global[primaryKey];
-
-    const dataInterpretationModels = [];
-
-    for (const pKey in analysisResults.global) {
-        const r = analysisResults.global[pKey];
-        if (!r || !r.eigen) continue;
-        
-        const eig1 = r.eigen?.values?.[0];
-        let l1 = Math.max(1e-5, eig1 ?? 0);
-        let l2 = Math.max(1e-5, r.eigen?.values?.[1] ?? 0);
-        let l3 = Math.max(1e-5, r.eigen?.values?.[2] ?? 0);
-
-        let woodcockC = Math.log(Math.max(1.0, l1 / l3));
-        let woodcockK_Num = Math.log(Math.max(1.0, l1 / l2));
-        let woodcockK_Den = Math.log(Math.max(1.0, l2 / l3));
-        let woodcockK = (woodcockK_Den > 1e-5) ? (woodcockK_Num / woodcockK_Den) : 0.0;
-        let girdleIndex = (l1 - l3 > 1e-5) ? ((l1 - l2) / (l1 - l3)) : 0.0;
-
-        let phaseIndex = parseInt(pKey.replace('F', ''));
-        let targetPlanes = structuralDB.phases[phaseIndex]?.planar || [];
-        
-        let rLength = 0;
-        if (targetPlanes.length > 0) {
-            let rx = 0, ry = 0, rz = 0;
-            targetPlanes.forEach(p => { rx += p.vector[0]; ry += p.vector[1]; rz += p.vector[2]; });
-            rLength = Math.sqrt(rx*rx + ry*ry + rz*rz);
-        }
-
-        let fabricType = "Random Fabric Distribution";
-        if (woodcockC < 0.4) {
-            fabricType = "Random Fabric Distribution";
-        } else if (woodcockK > 2.0) {
-            fabricType = "Point Cluster";
-        } else if (woodcockK < 0.4) {
-            fabricType = "Cylindrical Girdle Distribution";
-        } else if (woodcockK >= 0.4 && woodcockK <= 2.0) {
-            fabricType = "Girdle / Planar Trend";
-        }
-
-        let geoExplanation = getFabricInterpretation(fabricType, {
-            lambda1: l1, lambda2: l2, lambda3: l3,
-            woodcockK: woodcockK, woodcockC: woodcockC,
-            rms: r.rms, suitability: r.reliability
-        });
-
-        dataInterpretationModels.push({
-            phaseName: r.phase,
-            l1, l2, l3,
-            woodcockK, woodcockC, girdleIndex, rLength,
-            sampleCount: targetPlanes.length,
-            classificationTitle: geoExplanation.title
-        });
-    }
-
-    dataInterpretationModels.forEach(model => {
-        if (tC) {
-            tC.innerHTML += `
-            <div style="font-size:13px; font-weight:700; margin-top:12px; color:#1e293b;">
-                ${model.phaseName} Orientation Tensor Statistics
-            </div>
-            <table style="width:100%; border-collapse:collapse; margin-bottom:8px; font-size:12px;">
-                <tr><th>&lambda;₁ (Dominant Axis)</th><td>${model.l1.toFixed(4)}</td></tr>
-                <tr><th>&lambda;₂ (Intermediate Axis)</th><td>${model.l2.toFixed(4)}</td></tr>
-                <tr><th>&lambda;₃ (Minor Axis)</th><td>${model.l3.toFixed(4)}</td></tr>
-                <tr style="border-top:1px dashed #cbd5e1;"><th>Woodcock K (Shape)</th><td>${model.woodcockK.toFixed(3)}</td></tr>
-                <tr><th>Woodcock C (Strength)</th><td>${model.woodcockC.toFixed(3)}</td></tr>
-                <tr><th>Girdle Index (Ig)</th><td>${model.girdleIndex.toFixed(3)}</td></tr>
-                <tr><th>Resultant Vector Length (R)</th><td>${model.rLength.toFixed(2)} (n=${model.sampleCount})</td></tr>
-                <tr style="background:#f8fafc; font-weight:bold; color:#0f172a;">
-                    <th>Fabric Classification</th>
-                    <td>${model.classificationTitle}</td>
-                </tr>
-            </table>`;
-        }
-    });
-
-    for (const pKey in analysisResults.global) {
-        const r = analysisResults.global[pKey];
-        if (!r) continue;
-        let betaStr = r.beta ? MathEngine.formatTrendPlunge(r.beta) : `<span style="color:#dc2626; font-weight:700;">No Beta (Cluster/Random)</span>`;
-        let bootStr = (r.beta && r.bootstrap && r.bootstrap.ci95 > 0) ? `&plusmn;${r.bootstrap.ci95.toFixed(1)}&deg;` : "N/A";
-        
-        if (fC) {
-            fC.innerHTML += `
-            <div style="font-size:13px; font-weight:700; margin-top:12px; color:#1e293b;">
-                ${r.phase} Fold Axis Analysis
-            </div>
-            <table style="width:100%; border-collapse:collapse; margin-bottom:15px; font-size:12px;">
-                <tr><th>Calculated &beta;-axis</th><td>${betaStr}</td></tr>
-                <tr><th>95% Bootstrap CI</th><td>${bootStr}</td></tr>
-                <tr><th>Cylindricity Profile</th><td>${r.beta ? r.cylindricity + '%' : 'N/A (Non-Girdle)'}</td></tr>
-                <tr><th>Fisher Dispersion (k)</th><td>${r.fisher.k.toFixed(1)}</td></tr>
-            </table>`;
-        }
-    }
-
-    if (mainReport.beta) {
-        document.getElementById('card-trend-plunge').innerHTML = `Trend: ${Math.round(mainReport.beta.trend).toString().padStart(3,'0')}°<br>Plunge: ${Math.round(mainReport.beta.plunge).toString().padStart(2,'0')}°`;
-        document.getElementById('card-cyl-val').innerText = `${mainReport.cylindricity}%`;
-        document.getElementById('card-cyl-profile').innerText = `RMS ${mainReport.rms.toFixed(2)}° Residual`;
-        document.getElementById('card-character').innerText = MathEngine.getPlungeCharacter(mainReport.beta.plunge);
-    } else {
-        document.getElementById('card-trend-plunge').innerHTML = `<span style="color:#dc2626; font-size:13px; font-weight:700;">Fabric Insufficient</span>`;
-        document.getElementById('card-cyl-val').innerText = "N/A";
-        document.getElementById('card-cyl-profile').innerText = "Point Cluster / Noise Detected";
-        document.getElementById('card-character').innerText = "Non-Cylindrical Distribution";
-    }
-    document.getElementById('conf-overall').innerText = `${mainReport.reliability}%`;
-    document.getElementById('conf-stars').innerText = mainReport.reliability >= 75 ? "★★★★★" : "★★★☆☆";
-    document.getElementById('conf-verification').innerText = `Verification markers: ${mainReport.evidence.join(', ')}`;
-
-    let tbl = `<div style="font-size:13px; font-weight:700; margin-top:10px;">Phase Correlation Evaluation Summary Matrix (&beta;<sub>n</sub> &rarr; FA<sub>n</sub> &rarr; L<sub>n</sub>)</div>
-    <table>
-        <thead>
-            <tr>
-                <th>Phase Unit</th>
-                <th>Calculated &beta;-axis</th>
-                <th>Field Hinge (FA)</th>
-                <th>&beta; &rarr; FA Misfit</th>
-                <th>Linear Fabric (L)</th>
-                <th>FA &rarr; L Alignment</th>
-            </tr>
-        </thead>
-        <tbody>`;
-        
-    for (let pKey in analysisResults.global) {
-        let r = analysisResults.global[pKey];
-        let faStr = r.faMean ? MathEngine.formatTrendPlunge(r.faMean) : "Missing";
-        let lStr = r.lMean ? MathEngine.formatTrendPlunge(r.lMean) : "Missing";
-        let faDev = r.faMisfit !== null ? `${r.faMisfit.toFixed(1)}°` : "--";
-        let lDev = r.lMisfit !== null ? `${r.lMisfit.toFixed(1)}°` : "--";
-        
-        tbl += `<tr>
-            <td><strong>${r.phase}</strong></td>
-            <td>${r.beta ? MathEngine.formatTrendPlunge(r.beta) : "N/A"}</td>
-            <td>${faStr} (${r.measuredFA})</td>
-            <td><span class="badge">${faDev} (${r.faCorrelation})</span></td>
-            <td>${lStr} (${r.measuredL})</td>
-            <td><span class="badge">${lDev} (${r.lCorrelation})</span></td>
-        </tr>`;
-    }
-    document.getElementById('correlationContainer').innerHTML = tbl + "</tbody></table>";
-
-    const interpretationContainer = document.getElementById('interpretationContainer');
-    if (interpretationContainer) {
-        let compiledNarrativeHtml = "";
-        dataInterpretationModels.forEach(model => {
-            const prose = buildNarrative(model);
-            const leftBorderColor = prose.styleHook === "accent-critical" ? "#dc3545" : 
-                                    prose.styleHook === "accent-girdle" ? "#0284c7" : "#64748b";
-
-            compiledNarrativeHtml += `
-                <div class="narrative-block" style="border-left: 4px solid ${leftBorderColor}; background: #f8fafc; padding: 16px; margin-bottom: 16px; border-radius: 0 4px 4px 0;">
-                    <h4 style="margin: 0 0 6px 0; font-size: 14px; color: #0f172a;">${prose.title}</h4>
-                    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; font-weight: 600; margin-bottom: 8px;">
-                        Classification: ${prose.classification}
-                    </div>
-                    <p style="font-size: 13px; color: #334155; line-height: 1.5; margin: 0 0 8px 0;">
-                        ${prose.insightText}
-                    </p>
-                    <small style="font-size: 11px; color: #94a3b8; display: block; font-style: italic;">
-                        ${prose.strengthSummary}
-                    </small>
-                </div>`;
-        });
-        interpretationContainer.innerHTML = compiledNarrativeHtml;
-    }
-
-    const totalL1  = (structuralDB.phases[1]?.linear || []).filter(l => l.structure === 'L1').length;
-    const totalL2  = (structuralDB.phases[2]?.linear || []).filter(l => l.structure === 'L2').length;
-    const totalL3  = (structuralDB.phases[3]?.linear || []).filter(l => l.structure === 'L3').length;
-    const totalFA1 = (structuralDB.phases[1]?.foldAxis || []).filter(f => f.structure === 'FA1').length;
-    const totalFA2 = (structuralDB.phases[2]?.foldAxis || []).filter(f => f.structure === 'FA2').length;
-    const totalFA3 = (structuralDB.phases[3]?.foldAxis || []).filter(f => f.structure === 'FA3').length;
-    const totalDomains = runtimeSummary.domains.length;
-
-    const structuralRuleset = [
-        { id: "R21", priority: 1, category: "Lineation", title: "Missing L1 Measurements", evaluate: () => totalL1 === 0, recommendation: "Measure L1 stretching lineations on S1 foliation surfaces to constrain transport direction and compare directly with the calculated β(S0,S1) fold axis." },
-        { id: "R22", priority: 1, category: "Lineation", title: "Missing L2 Measurements", evaluate: () => totalL2 === 0 && totalFA2 > 0, recommendation: "Collect L2 mineral or intersection lineations associated with F2 deformation to independently verify second-generation shortening directions." },
-        { id: "R23", priority: 1, category: "Lineation", title: "Missing L3 Measurements", evaluate: () => totalL3 === 0 && totalFA3 > 0, recommendation: "Acquire L3 lineation measurements where late-stage deformation fabrics are preserved to strengthen higher-order kinematic interpretations." },
-        { id: "R24", priority: 1, category: "Fold Axis", title: "Missing FA1", evaluate: () => totalFA1 === 0, recommendation: "Map F1 fold hinge traces (FA1) to independently validate the calculated β(S0,S1) statistical fold axis." },
-        { id: "R25", priority: 1, category: "Fold Axis", title: "Missing FA2", evaluate: () => totalFA2 === 0 && totalL2 > 0, recommendation: "Measure F2 hinge orientations (FA2) to verify the β(S1,S2) fold axis and evaluate progressive deformation." },
-        { id: "R26", priority: 1, category: "Fold Axis", title: "Missing FA3", evaluate: () => totalFA3 === 0 && totalL3 > 0, recommendation: "Record F3 fold hinges (FA3) wherever observable to validate late-stage deformation geometries." },
-        { id: "R27", priority: 2, category: "Structural Domains", title: "Limited Domain Coverage", evaluate: () => totalDomains <= 1, recommendation: "Extend structural mapping into additional domains to determine whether fold geometry remains regionally consistent or changes across lithological boundaries." },
-        { id: "R28", priority: 2, category: "Younging Indicators", title: "Facing Direction Unknown", evaluate: () => true, recommendation: "Record sedimentary younging indicators where preserved to distinguish upright from overturned fold limbs and improve vergence interpretation." },
-        { id: "R29", priority: 2, category: "Fold Geometry", title: "Hinge Zone Density", evaluate: () => true, recommendation: "Increase structural station density within inferred hinge zones to improve β-axis precision and cylindricity assessment." }
-    ];
-
-    let finalRecs = structuralRuleset.filter(rule => rule.evaluate()).sort((a,b)=>a.priority-b.priority);
-    if(finalRecs.length===0){
-        finalRecs.push({ id:"PASS", priority:999, category:"Quality Control", title:"Dataset Complete", recommendation: "No significant acquisition gaps were identified. The imported structural dataset satisfies the minimum analytical requirements for tensor analysis, β-axis determination, deformation-phase correlation, and structural interpretation." });
-    }
-
-    const chkBoxContainer = document.getElementById('checklistContainer');
-    if (chkBoxContainer) {
-        chkBoxContainer.innerHTML = "";
-        finalRecs.forEach(m => { 
-            chkBoxContainer.innerHTML += `<div class="checklist-item" style="display:flex; gap:8px; margin-bottom:6px;"><input type="checkbox"><div><strong>${m.title}:</strong> ${m.recommendation}</div></div>`; 
-        });
-    }
-
-    buildLimitations();
-}
-
-// Wrap reporting engine invocation with clear UI containers reset and global exception handling
-try {
-    const containerIds = ["interpretationContainer", "checklistContainer", "limitationsContainer"];
-    containerIds.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.innerHTML = "";
-    });
-} catch (err) {
-    console.error("Structural Reporting Engine Critical Error:", err);
-}
-
-// ==========================================
-// 6. PIPELINE WORKSPACE RUNTIME EXECUTION
-// ==========================================
-function executeSuite() {
-    const pRes = InputLayer.parseCSV(document.getElementById('csvInput').value);
-    const logD = document.getElementById('qcLogs'); logD.innerHTML = "";
-    pRes.logs.forEach(l => { logD.innerHTML += `<div class="qc-item qc-${l.type ==='pass'?'pass':'warn'}">${l.msg}</div>`; });
-    
-    executeStructuralSynthesisPipeline();
-    displayDatasetCounts();
+// Override original visualization pipeline step to redirect graphics calculations safely
+const originalRenderEverything = renderEverything;
+renderEverything = function() {
+    originalRenderEverything();
     VisualizationEngine.render();
-    buildStructuralReportingSuites();
-    
-    document.getElementById('polyphaseWarningContainer').innerHTML = `<div class="qc-item qc-pass"><strong>Phasor Engine Live:</strong> Data evaluated across explicit generational vectors. Mapped Domains: [${runtimeSummary.domains.join(", ")}].</div>`;
-}
+};
 
+// ==========================================
+// INTERACTIVE EXTRAS INTERFACE UTILITIES
+// ==========================================
 function exportDataToCSV() {
     const csvContent = document.getElementById('csvInput').value;
     if (!csvContent.trim()) { alert("No data available to export."); return; }
