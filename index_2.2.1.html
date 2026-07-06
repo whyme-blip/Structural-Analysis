@@ -413,14 +413,13 @@ let geometry = {
 
 // Stage 3-7 Analysis Results Repository
 let analysisResults = {
-    phase: { S0: null, S1: null, S2: null, S3: null },
-    evidence: null,
-    recommendations: [],
-    limitations: [],
-    narrative: null,
-    qcWarnings: []
+    phase: {
+        F1: { beta: null, tensor: null, bootstrap: null, cylindricity: null, FAcomparison: null, Lcomparison: null, confidence: null, recommendations: [], limitations: [], narrative: "" },
+        F2: { beta: null, tensor: null, bootstrap: null, cylindricity: null, FAcomparison: null, Lcomparison: null, confidence: null, recommendations: [], limitations: [], narrative: "" },
+        F3: { beta: null, tensor: null, bootstrap: null, cylindricity: null, FAcomparison: null, Lcomparison: null, confidence: null, recommendations: [], limitations: [], narrative: "" }
+    },
+    evidence: {} 
 };
-
 const symbolsConfig = {
     'S0': { char: '●', color: '#2563eb', label: 'Bedding S0' }, 'S1': { char: '▲', color: '#16a34a', label: 'Foliation S1' },
     'S2': { char: '■', color: '#a855f7', label: 'Cleavage S2' }, 'S3': { char: '◆', color: '#f97316', label: 'Fabric S3' },
@@ -434,14 +433,18 @@ let rawParsedRows = []; // Intermediate placeholder between parseCSV and routeGe
 // ==========================================
 // STAGE 1: ORCHESTRATION ENGINE
 // ==========================================
+// ==========================================
+// STAGE 1: ORCHESTRATION ENGINE
+// ==========================================
 function executeSuite() {
     parseCSV();
     routeGeometry();
-    analyseAllPhases();
-    buildEvidence();
-    generateRecommendations(); // Invokes Stage 5 Engine
-    generateLimitations();      // Invokes Stage 6 Engine
-    compileNarrative();        // Invokes Stage 7 Engine
+    
+    // This single call now builds the full object-oriented phase matrix
+    // (including evidence metrics, recommendations, limitations, and narratives)
+    analyseAllPhases(); 
+    
+    // Direct dispatch to your updated UI rendering engine
     renderEverything();
 }
 
@@ -456,7 +459,8 @@ const MathEngine = {
     vectorToTrendPlunge(v) {
         let s = v[2] < 0 ? -1 : 1, x = v[0]*s, y = v[1]*s, z = v[2]*s;
         let p = Math.asin(Math.max(-1, Math.min(1, z))) * 180 / Math.PI;
-        let t = Math.atan2(x, y) * 180 / Math.PI; return { trend: t < 0 ? t + 360 : t, plunge: p };
+        let t = Math.atan2(x, y) * 180 / Math.PI; 
+        return { trend: t < 0 ? t + 360 : t, plunge: p };
     },
     getAngle(v1, v2) {
         return Math.acos(Math.max(-1, Math.min(1, Math.abs(v1[0]*v2[0] + v1[1]*v2[1] + v1[2]*v2[2])))) * 180 / Math.PI;
@@ -542,245 +546,118 @@ const MathEngine = {
         if (diff <= 20) return "Good";
         if (diff <= 35) return "Moderate";
         return "Poor";
+    },
+    getPlungeCharacter(plunge) {
+        if (plunge < 10) return "Subhorizontal / Nearly Flat";
+        if (plunge < 30) return "Gently Plunging";
+        if (plunge < 60) return "Moderately Plunging";
+        return "Steeply Plunging";
     }
 };
 
 // ==========================================
-// STAGE 2: PARSE & GEOMETRY ROUTER
-// ==========================================
-function parseCSV() {
-    rawParsedRows = [];
-    analysisResults.qcWarnings = [];
-    const text = document.getElementById('csvInput').value;
-    const lines = text.trim().split('\n');
-    if (lines.length < 2) return;
-    
-    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-    let stSet = new Set(), domSet = new Set(), lithSet = new Set();
-    runtimeSummary.hasYounging = false;
-
-    for (let i = 1; i < lines.length; i++) {
-        if (!lines[i].trim()) continue;
-        const cols = lines[i].split(',').map(c => c.trim()); 
-        let row = {};
-        headers.forEach((h, idx) => { row[h] = cols[idx]; });
-        
-        let lat = parseFloat(row.latitude), lon = parseFloat(row.longitude);
-        let strVal = parseFloat(row.strike || row.trend), dipVal = parseFloat(row.dip || row.plunge);
-        if (isNaN(lat) || isNaN(lon) || isNaN(strVal) || isNaN(dipVal)) continue;
-
-        if (strVal < 0 || strVal > 360 || dipVal < 0 || dipVal > 90) {
-            analysisResults.qcWarnings.push(`Line ${i + 1} (Station: ${row.station || 'N/A'}): Dropped out-of-bounds geometry [Strike/Trend: ${strVal}°, Dip/Plunge: ${dipVal}°].`);
-            continue;
-        }
-
-        let rawStruct = (row.structure || 'S0').toUpperCase().replace(/[\s_\-]/g, '');
-        let normStruct = 'S0';
-        if (['S0','S1','S2','S3','L1','L2','L3','FA1','FA2','FA3'].includes(rawStruct)) normStruct = rawStruct;
-        else if (['FOLDAXIS', 'FOLDAXIS1', 'FA'].includes(rawStruct)) normStruct = 'FA1';
-        else if (['FOLDAXIS2'].includes(rawStruct)) normStruct = 'FA2';
-        else if (['FOLDAXIS3'].includes(rawStruct)) normStruct = 'FA3';
-
-        let stId = row.station || `ST${i}`, dId = row.domain || 'Global', lth = row.lithology || 'Unknown';
-        stSet.add(stId); domSet.add(dId);
-        if (row.lithology && row.lithology !== 'Unknown') lithSet.add(lth);
-        if (row.younging && row.younging.trim() !== '') runtimeSummary.hasYounging = true;
-
-        rawParsedRows.push({ station: stId, lat, lon, domain: dId, lithology: lth, structure: normStruct, strike: strVal, dip: dipVal });
-    }
-    runtimeSummary.stations = stSet.size;
-    runtimeSummary.measurements = rawParsedRows.length;
-    runtimeSummary.domains = [...domSet];
-    runtimeSummary.lithologies = lithSet.size > 0 ? [...lithSet] : ["Quartzite", "Schist"];
-}
-
-function routeGeometry() {
-    // Reset structural registry
-    geometry.planar = { S0: [], S1: [], S2: [], S3: [] };
-    geometry.linear = { L1: [], L2: [], L3: [] };
-    geometry.foldAxis = { FA1: [], FA2: [], FA3: [] };
-
-    rawParsedRows.forEach(row => {
-        let rec = { ...row, type: "", vector: [0,0,0] };
-        if (['S0', 'S1', 'S2', 'S3'].includes(row.structure)) {
-            rec.type = "Plane";
-            let rS = ((row.strike + 90) % 360) * Math.PI / 180, rD = row.dip * Math.PI / 180;
-            rec.vector = [Math.sin(rD) * Math.sin(rS), Math.sin(rD) * Math.cos(rS), Math.cos(rD)];
-            if (rec.vector[2] < 0) rec.vector = rec.vector.map(x => -x);
-            geometry.planar[row.structure].push(rec);
-        } else if (['L1', 'L2', 'L3'].includes(row.structure)) {
-            rec.type = "Lineation";
-            let rT = row.strike * Math.PI / 180, rP = row.dip * Math.PI / 180;
-            rec.vector = [Math.cos(rP) * Math.sin(rT), Math.cos(rP) * Math.cos(rT), Math.sin(rP)];
-            if (rec.vector[2] < 0) rec.vector = rec.vector.map(x => -x);
-            geometry.linear[row.structure].push(rec);
-        } else if (['FA1', 'FA2', 'FA3'].includes(row.structure)) {
-            rec.type = "FoldAxis";
-            let rT = row.strike * Math.PI / 180, rP = row.dip * Math.PI / 180;
-            rec.vector = [Math.cos(rP) * Math.sin(rT), Math.cos(rP) * Math.cos(rT), Math.sin(rP)];
-            if (rec.vector[2] < 0) rec.vector = rec.vector.map(x => -x);
-            geometry.foldAxis[row.structure].push(rec);
-        }
-    });
-}
-
-// ==========================================
-// STAGE 3: PHASE ANALYSIS ENGINE
+// REFACTORED PHASE-DRIVEN CORRELATION ENGINE
 // ==========================================
 function analyseAllPhases() {
-    analysisResults.phase["S0"] = analysePhase("S0");
-    analysisResults.phase["S1"] = analysePhase("S1");
-    analysisResults.phase["S2"] = analysePhase("S2");
-    analysisResults.phase["S3"] = analysePhase("S3");
-}
+    const generations = [
+        { key: "F1", planar: "S0", foldAxis: "FA1", lineation: "L1" },
+        { key: "F2", planar: "S1", foldAxis: "FA2", lineation: "L2" },
+        { key: "F3", planar: "S2", foldAxis: "FA3", lineation: "L3" }
+    ];
 
-function analysePhase(phaseKey) {
-    let subset = geometry.planar[phaseKey] || [];
-    let count = subset.length;
-    
-    // Default matrix frameworks
-    let tensor = [[0,0,0],[0,0,0],[0,0,0]];
-    let eigen = { values: [0,0,0], vectors: [[0,0,1],[0,0,1],[0,0,1]] };
-    let woodcock = { K: 0, C: 0, girdleIndex: 0, rLength: 0 };
-    let classification = "Insufficient Data";
-    let beta = null;
-    let bootstrap = { trend: 0, plunge: 0, ci95: 0 };
-    let rmsError = 0;
-    let cylindricity = 0;
-    let confidence = { reliability: 0, overall: "0%", quality: "Insufficient" };
-    let recs = [];
-    let lims = [];
+    let globalMatrix = [];
+    let validChecks = 0;
+    let excellentChecks = 0;
 
-    if (count >= 2) {
-        tensor = MathEngine.buildOrientationTensor(subset);
-        eigen = MathEngine.solveEigenstructures(tensor);
+    generations.forEach(gen => {
+        let planeSubset = geometry.planar[gen.planar] || [];
+        let faSubset = geometry.foldAxis[gen.foldAxis] || [];
+        let linSubset = geometry.linear[gen.lineation] || [];
+
+        if (planeSubset.length === 0) return;
+
+        let T = MathEngine.buildOrientationTensor(planeSubset);
+        let eig = MathEngine.solveEigenstructures(T);
+        let eVals = eig.values; 
+        let betaAxis = MathEngine.vectorToTrendPlunge(eig.vectors[2]);
+
+        let bootstrapData = MathEngine.calculateBootstrap(planeSubset);
+        let fisherFA = faSubset.length > 0 ? MathEngine.calculateFisherStatistics(faSubset) : null;
+        let fisherLin = linSubset.length > 0 ? MathEngine.calculateFisherStatistics(linSubset) : null;
+
+        let faMisfit = null;
+        let faGrade = "No Data";
+        if (betaAxis && fisherFA) {
+            let vBeta = MathEngine.trendPlungeToVector(betaAxis.trend, betaAxis.plunge);
+            let vFA = MathEngine.trendPlungeToVector(fisherFA.meanTrend, fisherFA.meanPlunge);
+            faMisfit = MathEngine.getAngle(vBeta, vFA);
+            faGrade = MathEngine.getCorrelationGrade(faMisfit);
+            validChecks++;
+            if (faGrade === "Excellent" || faGrade === "Good") excellentChecks++;
+        }
+
+        let linMisfit = null;
+        let linGrade = "No Data";
+        if (betaAxis && fisherLin) {
+            let vBeta = MathEngine.trendPlungeToVector(betaAxis.trend, betaAxis.plunge);
+            let vLin = MathEngine.trendPlungeToVector(fisherLin.meanTrend, fisherLin.meanPlunge);
+            linMisfit = MathEngine.getAngle(vBeta, vLin);
+            linGrade = MathEngine.getCorrelationGrade(linMisfit);
+            validChecks++;
+            if (linGrade === "Excellent" || linGrade === "Good") excellentChecks++;
+        }
+
+        let lnE1E2 = Math.log(eVals[0] / eVals[1]);
+        let lnE2E3 = Math.log(eVals[1] / eVals[2]);
+        let profileType = lnE1E2 > lnE2E3 ? "Cluster (True Plane)" : "Girdle (Cylindrical Folding)";
+
+        let dynamicRecs = [];
+        let dynamicLimits = [];
+        let plungeDescription = MathEngine.getPlungeCharacter(betaAxis.plunge);
         
-        let l1 = Math.max(1e-5, eigen.values[0]);
-        let l2 = Math.max(1e-5, eigen.values[1]);
-        let l3 = Math.max(1e-5, eigen.values[2]);
-
-        woodcock.C = Math.log(l1 / l3);
-        let kDen = Math.log(l2 / l3);
-        woodcock.K = kDen > 1e-5 ? (Math.log(l1 / l2) / kDen) : 0;
-        woodcock.girdleIndex = (l1 - l3 > 1e-5) ? ((l1 - l2) / (l1 - l3)) : 0;
-        
-        let fisher = MathEngine.calculateFisherStatistics(subset);
-        woodcock.rLength = fisher.rLength;
-
-        if (woodcock.C < 0.4) {
-            classification = "Random/Isotropic Distribution";
-        } else if (woodcock.K > 2.0) {
-            classification = "Point Cluster";
-        } else if (woodcock.K < 0.4) {
-            classification = "Cylindrical Girdle Distribution";
-            beta = MathEngine.vectorToTrendPlunge(eigen.vectors[2]);
+        if (faGrade === "Poor" || linGrade === "Poor") {
+            dynamicRecs.push(`Investigate spatial sub-domains for ${gen.key} to target localized structural overprinting.`);
+            dynamicLimits.push(`High angular misfit detected between calculated plane profiles and observed kinematics.`);
         } else {
-            classification = "Girdle / Planar Trend";
-            beta = MathEngine.vectorToTrendPlunge(eigen.vectors[2]);
+            dynamicRecs.push(`Incorporate ${gen.key} geometry into regional cross-section balanced restorations.`);
+        }
+        if (planeSubset.length < 10) {
+            dynamicLimits.push(`Small planar sample size (n=${planeSubset.length}) increases statistical variance error boundaries.`);
         }
 
-        if (beta) {
-            rmsError = MathEngine.calculateRMS(subset, beta);
-            bootstrap = MathEngine.calculateBootstrap(subset);
-            cylindricity = rmsError < 3 ? 100 : (rmsError < 6 ? 90 : (rmsError < 10 ? 80 : (rmsError < 15 ? 70 : 50)));
-        }
+        let dynamicNarrative = `The fabric generation ${gen.key} exhibits a ${plungeDescription} β-axis trending ${Math.round(betaAxis.trend)}°. ` +
+                               `Structural distributions match a ${profileType} profile arrangement. Correlation against observed lineations (${gen.lineation}) is evaluated as ${linGrade}.`;
 
-        let relScore = count >= 6 ? 85 : 60;
-        confidence = {
-            reliability: relScore,
-            overall: `${relScore}%`,
-            quality: relScore >= 75 ? "Good" : "Moderate",
-            rms: rmsError,
-            cylindricity: cylindricity,
-            fisherK: fisher.k
+        // Pack the entire structural configuration into the target profile object
+        analysisResults.phase[gen.key] = {
+            beta: { trend: betaAxis.trend, plunge: betaAxis.plunge },
+            tensor: { eigenvalues: eVals, vectors: eig.vectors },
+            bootstrap: bootstrapData,
+            cylindricity: {
+                woodcockParameter: eVals[1] > 0 ? (lnE1E2 / lnE2E3) : 0,
+                profile: profileType
+            },
+            FAcomparison: { misfit: faMisfit, grade: faGrade, samples: faSubset.length },
+            Lcomparison: { misfit: linMisfit, grade: linGrade, samples: linSubset.length },
+            confidence: {
+                grade: faGrade === "Excellent" && linGrade === "Excellent" ? "High Confidence" : "Moderate to Low Confidence"
+            },
+            recommendations: dynamicRecs,
+            limitations: dynamicLimits,
+            narrative: dynamicNarrative
         };
-    } else {
-        if (count === 1) lims.push({ priority: 1, category: "Phase Engine", text: `Phase ${phaseKey} has only 1 data point; statistics cannot be compiled.` });
-    }
 
-    // Structural Profile Explanations
-    let narrative = { summary: "", interpretation: "", diagnosis: "" };
-    if (count >= 2) {
-        narrative.summary = `${phaseKey} analysis computed across ${count} stations with structural fabric thickness C = ${woodcock.C.toFixed(2)}.`;
-        if (classification === "Cylindrical Girdle Distribution") {
-            narrative.interpretation = `The planar elements display systematic rotational variance defining a coherent structural profile.`;
-            narrative.diagnosis = `Active cylindrical dispersion identifies an un-mixed fold architecture tracking along hinge point ${MathEngine.vectorToTrendPlunge(eigen.vectors[2]).trend.toFixed(0)}°.`;
-        } else if (classification === "Point Cluster") {
-            narrative.interpretation = `The dataset profiles as a uniform orientation block, mapping either a structural limb or homoclinal unit.`;
-            narrative.diagnosis = `Data clustering restricts local beta extraction. Spatial girdle coverage is inadequate.`;
-        } else {
-            narrative.interpretation = `Planar distribution traces a broad trend with intermediate axial dispersion constraints.`;
-            narrative.diagnosis = `Deformation properties match multi-phase overlap features or non-cylindrical configurations.`;
-        }
-    } else {
-        narrative.summary = `Phase ${phaseKey} contains insufficient tracking records.`;
-    }
-
-    return { tensor, eigen, woodcock, classification, beta, bootstrap, confidence, recommendations: recs, limitations: lims, narrative };
-}
-
-// ==========================================
-// STAGE 4: INTER-FABRIC EVIDENCE ENGINE
-// ==========================================
-function buildEvidence() {
-    let matches = [];
-    
-    // Cross-validation checks
-    const structuralPairs = [
-        { betaPhase: "S0", fieldFA: "FA1", label: "β(S0) vs FA1" },
-        { betaPhase: "S1", fieldFA: "FA2", label: "β(S1) vs FA2" },
-        { betaPhase: "S2", fieldFA: "FA3", label: "β(S2) vs FA3" }
-    ];
-
-    structuralPairs.forEach(pair => {
-        let bData = analysisResults.phase[pair.betaPhase]?.beta;
-        let faSubset = geometry.foldAxis[pair.fieldFA] || [];
-        
-        let misfit = null, grade = "No Data";
-        if (bData && faSubset.length > 0) {
-            let faStats = MathEngine.calculateFisherStatistics(faSubset);
-            let vB = MathEngine.trendPlungeToVector(bData.trend, bData.plunge);
-            let vFA = MathEngine.trendPlungeToVector(faStats.meanTrend, faStats.meanPlunge);
-            misfit = MathEngine.getAngle(vB, vFA);
-            grade = MathEngine.getCorrelationGrade(misfit);
-        }
-        matches.push({ type: "Beta-FA", label: pair.label, misfit, grade, count: faSubset.length });
+        globalMatrix.push({ type: "Beta-FA", label: `β(${gen.planar}) vs ${gen.foldAxis}`, misfit: faMisfit, grade: faGrade, count: faSubset.length });
+        globalMatrix.push({ type: "Linear-Beta", label: `${gen.lineation} vs β(${gen.planar})`, misfit: linMisfit, grade: linGrade, count: linSubset.length });
     });
 
-    const linearPairs = [
-        { linKey: "L1", betaPhase: "S0", label: "L1 vs β(S0)" },
-        { linKey: "L2", betaPhase: "S1", label: "L2 vs β(S1)" },
-        { linKey: "L3", betaPhase: "S2", label: "L3 vs β(S2)" }
-    ];
-
-    linearPairs.forEach(pair => {
-        let lSubset = geometry.linear[pair.linKey] || [];
-        let bData = analysisResults.phase[pair.betaPhase]?.beta;
-
-        let misfit = null, grade = "No Data";
-        if (bData && lSubset.length > 0) {
-            let lStats = MathEngine.calculateFisherStatistics(lSubset);
-            let vB = MathEngine.trendPlungeToVector(bData.trend, bData.plunge);
-            let vL = MathEngine.trendPlungeToVector(lStats.meanTrend, lStats.meanPlunge);
-            misfit = MathEngine.getAngle(vB, vL);
-            grade = MathEngine.getCorrelationGrade(misfit);
-        }
-        matches.push({ type: "Linear-Beta", label: pair.label, misfit, grade, count: lSubset.length });
-    });
-
-    // Score evaluation framework
-    let validChecks = matches.filter(m => m.grade !== "No Data");
-    let excellentChecks = validChecks.filter(m => m.grade === "Excellent" || m.grade === "Good");
-    let score = validChecks.length > 0 ? Math.round((excellentChecks.length / validChecks.length) * 100) : 70;
-
+    let totalScore = validChecks > 0 ? Math.round((excellentChecks / validChecks) * 100) : 70;
     analysisResults.evidence = {
-        evidenceScore: `${score}%`,
-        reliability: score >= 75 ? "High Stability" : "Provisional Matrix",
-        confidence: score >= 70 ? "Good Structural Consistency" : "Review Inter-Fabric Misfits",
-        table: matches
+        evidenceScore: `${totalScore}%`,
+        reliability: totalScore >= 75 ? "High Stability" : "Provisional Architecture Matrix",
+        table: globalMatrix
     };
 }
-
 // ==========================================
 // STAGE 5: OBJECT-BASED RECOMMENDATION ENGINE
 // ==========================================
