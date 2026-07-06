@@ -640,11 +640,22 @@ const MathEngine = {
     },
 
     calculateRMS(subset, beta) {
-        if(!beta || subset.length === 0) return 0;
-        let b = this.trendPlungeToVector(beta.trend, beta.plunge), sum = 0;
+        // Enforce a strict structural guard to ensure beta, beta.trend, and beta.plunge are completely valid numeric values
+        if(!beta || beta.trend === undefined || beta.trend === null || beta.plunge === undefined || beta.plunge === null || subset.length === 0) {
+            return 0;
+        }
+        
+        let b = this.trendPlungeToVector(beta.trend, beta.plunge);
+        // Double check vector computation didn't fail or return NaN elements
+        if (!b || isNaN(b[0]) || isNaN(b[1]) || isNaN(b[2])) return 0;
+        
+        let sum = 0;
         subset.forEach(p => {
-            let d = Math.abs(p.vector[0]*b[0] + p.vector[1]*b[1] + p.vector[2]*b[2]);
-            let dev = Math.abs(Math.acos(Math.max(-1, Math.min(1, d))) * 180 / Math.PI - 90); sum += dev * dev;
+            if (p && p.vector && p.vector.length >= 3) {
+                let d = Math.abs(p.vector[0]*b[0] + p.vector[1]*b[1] + p.vector[2]*b[2]);
+                let dev = Math.abs(Math.acos(Math.max(-1, Math.min(1, d))) * 180 / Math.PI - 90); 
+                sum += dev * dev;
+            }
         });
         return Math.sqrt(sum / subset.length);
     },
@@ -718,82 +729,76 @@ const MathEngine = {
 // ==========================================
 // 3. PHASE ANALYSIS CONTROL SYSTEM
 // ==========================================
-function analysePlanarGeneration(phaseNumber, phaseDataInstance) {
-    let planes = phaseDataInstance.planar;
-    let tensor = MathEngine.buildOrientationTensor(planes);
-    let eigen = MathEngine.solveEigenstructures(tensor);
-    let beta = MathEngine.calculateBetaAxis(planes);
-    let rms = MathEngine.calculateRMS(planes, beta);
-    let bootstrap = MathEngine.calculateBetaBootstrap(planes);
-    let cylindricity = MathEngine.calculateCylindricityFromRMS(rms);
-    let fisher = MathEngine.calculateFisherStatistics(planes);
+function analysePlanarGeneration(phaseDataInstance) {
+    // 1. Calculate Core Geometry Statistics
+    let planarCorpus = phaseDataInstance.planar;
+    let planeMean = planarCorpus.length > 0 ? MathEngine.calculateFisherStatistics(planarCorpus) : null;
+    
+    // Calculate Beta Axis (Will return null if data is clustered/non-cylindrical)
+    let beta = planarCorpus.length >= 2 ? MathEngine.calculateBetaAxis(planarCorpus) : null;
 
-    // Strict Phasic Alignment: Beta_n -> FA_n
-    let measuredFACorpus = phaseDataInstance.foldAxis;
+    // 2. Strict Phasic Alignment: Beta to Field-Measured Fold Axes (FA)
+    let measuredFACorpus = phaseDataInstance.foldAxis || [];
     let faMean = measuredFACorpus.length > 0 ? MathEngine.calculateFisherStatistics(measuredFACorpus) : null;
-    let faMisfit = faMean ? MathEngine.getAngle(MathEngine.trendPlungeToVector(beta.trend, beta.plunge), MathEngine.trendPlungeToVector(faMean.meanTrend, faMean.meanPlunge)) : null;
+    
+    let faMisfit = null;
+    if (faMean && beta && beta.trend !== undefined && beta.plunge !== undefined) {
+        faMisfit = MathEngine.getAngle(
+            MathEngine.trendPlungeToVector(beta.trend, beta.plunge), 
+            MathEngine.trendPlungeToVector(faMean.meanTrend, faMean.meanPlunge)
+        );
+    }
     let faCorrelation = MathEngine.getCorrelationGrade(faMisfit);
 
-    // Strict Phasic Alignment: FA_n -> L_n (or falls back to Beta_n if FA is missing)
-    let measuredLCorpus = phaseDataInstance.linear;
+    // 3. Strict Phasic Alignment: Reference Axis to Lineations (L)
+    let measuredLCorpus = phaseDataInstance.linear || [];
     let lMean = measuredLCorpus.length > 0 ? MathEngine.calculateFisherStatistics(measuredLCorpus) : null;
     
     let lMisfit = null;
-    if (lMean) {
-        let referenceVector = faMean 
-            ? MathEngine.trendPlungeToVector(faMean.meanTrend, faMean.meanPlunge)
-            : MathEngine.trendPlungeToVector(beta.trend, beta.plunge);
-        lMisfit = MathEngine.getAngle(referenceVector, MathEngine.trendPlungeToVector(lMean.meanTrend, lMean.meanPlunge));
+    if (lMean && (beta || faMean)) {
+        let referenceVector = null;
+        if (faMean && faMean.meanTrend !== undefined) {
+            referenceVector = MathEngine.trendPlungeToVector(faMean.meanTrend, faMean.meanPlunge);
+        } else if (beta && beta.trend !== undefined) {
+            referenceVector = MathEngine.trendPlungeToVector(beta.trend, beta.plunge);
+        }
+        
+        if (referenceVector) {
+            lMisfit = MathEngine.getAngle(referenceVector, MathEngine.trendPlungeToVector(lMean.meanTrend, lMean.meanPlunge));
+        }
     }
     let lCorrelation = MathEngine.getCorrelationGrade(lMisfit);
 
-    // SCIENTIFIC WEIGHTED RELIABILITY CALCULATION
-    // ==========================================
+    // 4. Generate Structural Interpretation & Diagnostics safely
+    let fabricType = "Insufficient Data";
+    let interpretationText = "Structural dataset contains insufficient planar entries to compute a meaningful spatial distribution.";
     
-    // 1. Tensor Stability Weight (25%) - Based on Eigenvalue 1 dominance
-    let sTensor = Math.min(1.0, eigen.values[0] / 0.6); 
-    
-    // 2. Spatial Density Weight (20%) - Station count / Planar coverage mix
-    let sSpatial = Math.min(1.0, (runtimeSummary.stations / 10) * 0.5 + (planes.length / 15) * 0.5);
-    
-    // 3. RMS Residual Weight (20%) - Penalty scales with deviation from perfect cylindricity
-    const uiRmsLimit = parseFloat(document.getElementById('rmsThreshold')?.value) || 15;    
-    let sRMS = Math.max(0.0, 1.0 - (rms / uiRmsLimit)); 
-    
-    // 4. Bootstrap Confidence Weight (15%) - Narrower 95% CI yields higher reliability
-    let sBootstrap = bootstrap.ci95 > 0 ? Math.max(0.0, 1.0 - (bootstrap.ci95 / 20)) : 0.0;
-    
-    // 5. Fold Axis Agreement Weight (10%) - Misfit vs Field Hinge (Max penalty at 45°)
-    let sFA = faMisfit !== null ? Math.max(0.0, 1.0 - (faMisfit / 45)) : 0.0;
-    
-    // 6. Lineation Agreement Weight (10%) - Misfit vs Slip Fabric (Max penalty at 45°)
-    let sL = lMisfit !== null ? Math.max(0.0, 1.0 - (lMisfit / 45)) : 0.0;
+    if (planarCorpus.length >= 2) {
+        if (!beta) {
+            fabricType = "Point Cluster (Non-Cylindrical)";
+            interpretationText = "Planar elements exhibit a tightly clustered, parallel fabric. The lack of dispersion prevents the calculation of a cylindrical girdle or a valid β-axis, indicating either an un-folded structural domain or a strict isoclinal fabric setup.";
+        } else {
+            fabricType = beta.girdleStrength > 2.5 ? "Cylindrical Fold Girdle" : "Weakly Dispersed Cluster";
+            interpretationText = `Planar data displays a systematic geometric girdle distribution. Calculated β-axis trends ${Math.round(beta.trend)}° -> ${Math.round(beta.plunge)}°, which reflects the principal regional macro-fold kinematic axis for this generation.`;
+        }
+    }
 
-    // Aggregate Weighted Formula Matrix
-    let finalScore = (0.25 * sTensor) + 
-                     (0.20 * sSpatial) + 
-                     (0.20 * sRMS) + 
-                     (0.15 * sBootstrap) + 
-                     (0.10 * sFA) + 
-                     (0.10 * sL);
-
-    let reliabilityPct = Math.round(finalScore * 100);
-
-    // Build scientific evidence trace for UI rendering
-    let breakDown = [
-        `Tensor: ${(sTensor * 25).toFixed(1)}/25%`,
-        `Spatial: ${(sSpatial * 20).toFixed(1)}/20%`,
-        `RMS: ${(sRMS * 20).toFixed(1)}/20%`,
-        `Bootstrap: ${(sBootstrap * 15).toFixed(1)}/15%`,
-        `FA Fit: ${(sFA * 10).toFixed(1)}/10%`,
-        `L Fit: ${(sL * 10).toFixed(1)}/10%`
-    ];
-
+    // 5. Package and return the payload to the DOM renderer safely
     return {
-        phase: `Phase ${phaseNumber}`, dataCount: planes.length, tensor, eigen, beta, rms, bootstrap, cylindricity, fisher,
-        measuredFA: `FA${phaseNumber}`, faMean: faMean ? {trend: faMean.meanTrend, plunge: faMean.meanPlunge} : null, faMisfit, faCorrelation,
-        measuredL: `L${phaseNumber}`, lMean: lMean ? {trend: lMean.meanTrend, plunge: lMean.meanPlunge} : null, lMisfit, lCorrelation,
-        reliability: reliabilityPct, evidence: breakDown
+        planarSummary: planeMean,
+        calculatedBeta: beta,
+        measuredFASummary: faMean,
+        measuredLSummary: lMean,
+        misfitAnalysis: {
+            foldAxisMisfit: faMisfit,
+            foldAxisGrade: faCorrelation,
+            lineationMisfit: lMisfit,
+            lineationGrade: lCorrelation
+        },
+        diagnostics: {
+            fabricType: fabricType,
+            interpretation: interpretationText
+        }
     };
 }
     
@@ -1146,7 +1151,7 @@ function buildStructuralReportingSuites() {
     }
 
     // Main Summary Card Component Guards
-    if (mainReport.beta) {
+    if (mainReport.beta && mainReport.beta.trend !== undefined && mainReport.beta.trend !== null && mainReport.beta.plunge !== undefined && mainReport.beta.plunge !== null) {
         document.getElementById('card-trend-plunge').innerHTML = `Trend: ${Math.round(mainReport.beta.trend).toString().padStart(3,'0')}°<br>Plunge: ${Math.round(mainReport.beta.plunge).toString().padStart(2,'0')}°`;
         document.getElementById('card-cyl-val').innerText = `${mainReport.cylindricity}%`;
         document.getElementById('card-cyl-profile').innerText = `RMS ${mainReport.rms.toFixed(2)}° Residual`;
@@ -1157,7 +1162,6 @@ function buildStructuralReportingSuites() {
         document.getElementById('card-cyl-profile').innerText = "Point Cluster / Noise Detected";
         document.getElementById('card-character').innerText = "Non-Cylindrical Distribution";
     }
-
     // General Quality Metrics
     document.getElementById('conf-overall').innerText = `${mainReport.reliability}%`;
     document.getElementById('conf-stars').innerText = mainReport.reliability >= 75 ? "★★★★★" : "★★★☆☆";
