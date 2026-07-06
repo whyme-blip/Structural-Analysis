@@ -120,14 +120,17 @@
         button:hover { background: #1d4ed8; transform: translateY(-1px); }
         .export-btn { background: #475569; width: auto; padding: 10px 20px; }
         .export-btn:hover { background: #334155; }
+        .secondary-btn { background: #0284c7; width: auto; padding: 10px 20px; }
+        .secondary-btn:hover { background: #0369a1; }
         .template-btn { background: transparent; color: var(--secondary); border: 1px solid var(--secondary); font-weight: 600; padding: 8px 14px; font-size: 12.5px; margin-bottom: 16px; box-shadow: none; }
         .template-btn:hover { background: #f0f9ff; }
         
         /* Advanced Calculation Constraints */
         .advanced-trigger { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: var(--text-muted); cursor: pointer; margin-top: 16px; user-select: none; }
         .advanced-content { display: none; background: var(--background); border: 1px solid var(--border); padding: 18px; border-radius: 8px; margin-top: 12px; font-size: 13px; }
-        .advanced-content label { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-weight: 600; color: var(--text-dark); }
-        .advanced-content input { width: 80px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; text-align: center; font-weight: bold; }
+        .advanced-content label { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; font-weight: 600; color: var(--text-dark); }
+        .advanced-content label div { display: flex; justify-content: space-between; font-size: 12px; }
+        .advanced-content input[type="range"] { width: 100%; margin-top: 4px; cursor: pointer; }
 
         /* Quality Control Log Visualizations */
         .qc-list { max-height: 140px; overflow-y: auto; font-family: monospace; font-size: 12px; }
@@ -148,9 +151,9 @@
         canvas { background: #ffffff; border-radius: 6px; max-width: 100%; height: auto; }
         .north-arrow { position: absolute; top: 16px; right: 16px; font-size: 11px; font-weight: 800; color: var(--text-dark); background: rgba(255,255,255,0.95); padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border); }
 
-        /* Alternating Table Framework */
+        /* Alternating Table Framework - FIXED to allow nested runtime row styling overrides */
         table { width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 8px; font-size: 14px; margin-bottom: 16px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
-        th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid var(--border); }
+        th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid var(--border); color: inherit; }
         th { background: #f1f5f9; color: var(--text-dark); font-weight: 700; width: 45%; border-bottom: 2px solid var(--border); }
         tr:last-child th, tr:last-child td { border-bottom: none; }
         tr:nth-child(even) td { background-color: #f8fafc; }
@@ -213,6 +216,7 @@
             <p>Offline | Tensor • Stereonet • Fold Analysis</p>
         </div>
         <div class="action-group">
+            <button class="secondary-btn" onclick="exportDataToCSV()">📊 Export Extracted Data</button>
             <button class="export-btn" onclick="openAllSectionsAndPrint()">💾 Export PDF Field Report</button>
         </div>
     </header>
@@ -252,8 +256,14 @@ ST02,30.114,78.246,L2,315,16,2,A,Quartzite,</textarea>
 
                 <div class="advanced-trigger" onclick="toggleAdvancedSettings()">⚙ Calculation Constraints</div>
                 <div class="advanced-content" id="advancedContent">
-                    <label>RMS Threshold (°)<input type="number" id="rmsThreshold" value="15"></label>
-                    <label>Suitability Break (%)<input type="number" id="suitabilityThreshold" value="50"></label>
+                    <label>
+                        <div><span>RMS Threshold Max Error</span><span id="rmsLabel">15°</span></div>
+                        <input type="range" id="rmsThreshold" min="5" max="45" value="15" oninput="document.getElementById('rmsLabel').innerText = this.value + '°'; executeSuite();">
+                    </label>
+                    <label>
+                        <div><span>Minimum Suitability Target</span><span id="suitabilityLabel">50%</span></div>
+                        <input type="range" id="suitabilityThreshold" min="10" max="95" value="50" oninput="document.getElementById('suitabilityLabel').innerText = this.value + '%'; executeSuite();">
+                    </label>
                 </div>
             </div>
 
@@ -278,21 +288,21 @@ ST02,30.114,78.246,L2,315,16,2,A,Quartzite,</textarea>
 
                     <div class="dashboard-group-title">Planar Data Framework</div>
                     <div class="inventory-grid">
-                        <div class="inventory-card"><div class="inv-val" id="inv-s0">0</div><div class="inv-lbl">S0 Bedding</div></div>
-                        <div class="inventory-card"><div class="inv-val" id="inv-s1">0</div><div class="inv-lbl">S1 Foliation</div></div>
-                        <div class="inventory-card"><div class="inv-val" id="inv-s2">0</div><div class="inv-lbl">S2 Cleavage</div></div>
-                        <div class="inventory-card"><div class="inv-val" id="inv-s3">0</div><div class="inv-lbl">S3 Fabric</div></div>
+                        <div class="inventory-card"><div class="inv-val" id="inv-s0">0</div><div class="inv-lbl">S₀ Bedding</div></div>
+                        <div class="inventory-card"><div class="inv-val" id="inv-s1">0</div><div class="inv-lbl">S₁ Foliation</div></div>
+                        <div class="inventory-card"><div class="inv-val" id="inv-s2">0</div><div class="inv-lbl">S₂ Cleavage</div></div>
+                        <div class="inventory-card"><div class="inv-val" id="inv-s3">0</div><div class="inv-lbl">S₃ Fabric</div></div>
                     </div>
 
                     <div class="dashboard-group-title">Linear &amp; Fold Axis Records</div>
                     <div class="inventory-grid">
-                        <div class="inventory-card"><div class="inv-val" id="inv-l1">0</div><div class="inv-lbl">L1 Lineation</div></div>
-                        <div class="inventory-card"><div class="inv-val" id="inv-l2">0</div><div class="inv-lbl">L2 Lineation</div></div>
-                        <div class="inventory-card"><div class="inv-val" id="inv-l3">0</div><div class="inv-lbl">L3 Lineation</div></div>
+                        <div class="inventory-card"><div class="inv-val" id="inv-l1">0</div><div class="inv-lbl">L₁ Lineation</div></div>
+                        <div class="inventory-card"><div class="inv-val" id="inv-l2">0</div><div class="inv-lbl">L₂ Lineation</div></div>
+                        <div class="inventory-card"><div class="inv-val" id="inv-l3">0</div><div class="inv-lbl">L₃ Lineation</div></div>
                         <div class="inventory-card"><div class="inv-val" id="inv-fa">0</div><div class="inv-lbl">Fold Axes</div></div>
                     </div>
 
-                    <div class="dashboard-group-title">Geological Statistics ($S_0$ Bedding)</div>
+                    <div class="dashboard-group-title">Geological Statistics (S₀ Bedding)</div>
                     <div id="geoStatisticsContainer"></div>
                 </div>
             </details>
@@ -320,7 +330,7 @@ ST02,30.114,78.246,L2,315,16,2,A,Quartzite,</textarea>
                     
                     <div id="foldSummaryCard" class="fold-summary-card">
                         <div class="fold-metric">
-                            <div class="fold-metric-lbl">Primary Calculated $\beta$-axis</div>
+                            <div class="fold-metric-lbl">Primary Calculated β-axis</div>
                             <div class="fold-metric-val highlight" id="card-trend-plunge">Trend: 000°<br>Plunge: 00°</div>
                         </div>
                         <div class="fold-metric">
@@ -342,7 +352,7 @@ ST02,30.114,78.246,L2,315,16,2,A,Quartzite,</textarea>
                         <div class="conf-metric"><div class="conf-lbl">Spatial Coverage</div><div class="conf-val" id="conf-coverage">Moderate</div></div>
                         <div class="conf-metric"><div class="conf-lbl">Fold Geometry</div><div class="conf-val" id="conf-geom">Excellent</div></div>
                         <div class="conf-metric"><div class="conf-lbl">Tensor Stability</div><div class="conf-val" id="conf-tensor">High</div></div>
-                        <div class="conf-metric" style="grid-column: span 3;"><div class="conf-lbl">$\beta$-axis Verification Status</div><div class="conf-val" id="conf-verification" style="color:var(--success);">Dynamic evaluation running</div></div>
+                        <div class="conf-metric" style="grid-column: span 3;"><div class="conf-lbl">β-axis Verification Status</div><div class="conf-val" id="conf-verification" style="color:var(--success);">Dynamic evaluation running</div></div>
                     </div>
 
                     <div id="foldGeometryContainer"></div>
