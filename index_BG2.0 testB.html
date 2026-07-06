@@ -1234,40 +1234,63 @@ function buildStructuralReportingSuites() {
     // Recommendations Checklists & Map Controls Tracker
     const recommendations = [];
     let totalL = 0, totalFA = 0;
-    for(let p=1; p<=3; p++) { 
-        if(structuralDB.phases[p]) {
-            totalL += (structuralDB.phases[p].linear || []).length; 
-            totalFA += (structuralDB.phases[p].foldAxis || []).length; 
+    
+    // Fallback checks to safely count elements across active DB structures
+    for (let p in structuralDB.phases) {
+        let phaseObj = structuralDB.phases[p];
+        if (phaseObj) {
+            if (phaseObj.linear) totalL += phaseObj.linear.length;
+            if (phaseObj.foldAxis) totalFA += phaseObj.foldAxis.length;
         }
     }
 
-    if (totalL === 0) recommendations.push("<strong>Fieldwork Missing:</strong> Measure mineral stretching lineations across active profiles to tie kinematic slip coordinates.");
-    if (totalFA === 0) recommendations.push("<strong>Validation Gap:</strong> Direct map physical outcrop micro-fold hinge orientations to confirm tensor beta modeling.");
-    if (runtimeSummary.domains && runtimeSummary.domains.length === 1) recommendations.push("<strong>Homogeneous Spatial Profile:</strong> Extend structural collection loops into adjacent domains to establish regional mapping consistency.");
+    if (totalL === 0) {
+        recommendations.push("<strong>Fieldwork Missing:</strong> Measure mineral stretching lineations across active profiles to tie kinematic slip coordinates.");
+    } else {
+        recommendations.push(`<strong>Linear Fabric Optimization:</strong> Mapped ${totalL} active lineations. Cross-check vectors against localized fold axis alignments.`);
+    }
     
+    if (totalFA === 0) {
+        recommendations.push("<strong>Validation Gap:</strong> Direct map physical outcrop micro-fold hinge orientations to confirm tensor beta modeling.");
+    } else {
+        recommendations.push(`<strong>Hinge Verification Active:</strong> Mapped ${totalFA} direct minor fold axes. Monitor structural variance against computed beta nodes.`);
+    }
+    
+    if (!runtimeSummary.domains || runtimeSummary.domains.length <= 1) {
+        recommendations.push("<strong>Homogeneous Spatial Profile:</strong> Extend structural collection loops into adjacent domains to establish regional mapping consistency.");
+    }
+
     const chkBoxContainer = document.getElementById('checklistContainer');
     if (chkBoxContainer) {
         chkBoxContainer.innerHTML = "";
-        if (recommendations.length === 0) recommendations.push("Baseline target data saturated. Spatial configuration complete.");
-        recommendations.forEach(m => { chkBoxContainer.innerHTML += `<div class="checklist-item"><input type="checkbox"><div>${m}</div></div>`; });
+        recommendations.forEach(m => { 
+            chkBoxContainer.innerHTML += `<div class="checklist-item" style="display:flex; gap:8px; margin-bottom:6px;"><input type="checkbox"><div>${m}</div></div>`; 
+        });
     }
 
     // Output Field Limitations Summary Notes
     const limitations = [];
     for (let pKey in analysisResults.global) {
         let r = analysisResults.global[pKey];
-        if (!r.beta) limitations.push(`Layer ${r.phase} point cluster/scatter configuration prevents unique fold axis extraction.`);
-        if (r.faMean === null) limitations.push(`The calculated spatial beta-axis projection for phase ${r.phase} has not been confirmed via physical outcrop structural logs.`);
-        if (r.beta && r.bootstrap && r.bootstrap.ci95 > 20) limitations.push(`Deformation phase layer ${r.phase} displays high orientation variance. Bootstrap angular calculation limits are wide.`);
+        if (!r) continue;
+        if (!r.beta) limitations.push(`Layer ${r.phase || pKey} point cluster/scatter configuration prevents unique fold axis extraction.`);
+        if (!r.faMean) limitations.push(`The calculated spatial beta-axis projection for phase ${r.phase || pKey} has not been verified via physical outcrop fold hinge coordinates.`);
+        if (r.beta && r.bootstrap && r.bootstrap.ci95 > 20) limitations.push(`Deformation phase layer ${r.phase || pKey} displays high orientation variance; bootstrap bounds are widely spread.`);
     }
-    if (runtimeSummary.stations < 10) limitations.push(`Spatial tracking profile density remains localized (Count: ${runtimeSummary.stations} active stations).`);
-
-    let limHtml = `<ul style="padding-left:20px; font-size:13px;">`;
-    limitations.forEach(l => limHtml += `<li>${l}</li>`);
-    limHtml += `</ul><div class="caution-box"><strong>Domain Modeling Notice:</strong> Multi-domain calculations assume homogeneous planar characteristics inside explicit mapped sub-sectors.</div>`;
     
-    let limCont = document.getElementById('limitationsContainer');
-    if (limCont) limCont.innerHTML = limHtml;
+    let totalStations = runtimeSummary.stations || 0;
+    if (totalStations < 10) limitations.push(`Spatial tracking profile density remains highly localized (Count: ${totalStations} active stations).`);
+    if (limitations.length === 0) limitations.push("No severe geometrical data exceptions flag structural limits on the active profile.");
+
+    let limHtml = `<ul style="padding-left:20px; font-size:13px; margin:0 0 10px 0; line-height:1.5;">`;
+    limitations.forEach(l => { limHtml += `<li style="margin-bottom:4px;">${l}</li>`; });
+    limHtml += `</ul><div class="caution-box" style="background:#fef2f2; border-left:3px solid #ef4444; padding:8px; font-size:11px; color:#991b1b; border-radius:4px;"><strong>Domain Modeling Notice:</strong> Multi-domain calculations assume homogeneous planar characteristics inside explicit mapped sub-sectors.</div>`;
+    
+    // Safely write to either limitationsContainer or analysisNotes display ports if naming structures diverge
+    let limCont = document.getElementById('limitationsContainer') || document.getElementById('analysisNotesContainer') || document.getElementById('analysisNotes');
+    if (limCont) {
+        limCont.innerHTML = limHtml;
+    }
 }
     
 // ==========================================
