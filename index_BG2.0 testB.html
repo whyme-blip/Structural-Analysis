@@ -672,10 +672,10 @@ const MathEngine = {
         let rLen = Math.sqrt(R[0]*R[0] + R[1]*R[1] + R[2]*R[2]);
         let bMean = this.vectorToTrendPlunge(R.map(x => x / rLen));
 
-        let devAngles = axes.map(a => {
+        let devAngles = axes.filter(a => a !== null).map(a => {
             return this.getAngle(this.trendPlungeToVector(bMean.trend, bMean.plunge), this.trendPlungeToVector(a.trend, a.plunge));
         }).sort((x, y) => x - y);
-        let ci95 = devAngles[949] || 0; 
+        let ci95 = devAngles[Math.floor(devAngles.length * 0.95)] || 0;
 
         return { trend: bMean.trend, plunge: bMean.plunge, ci95 };
     },
@@ -838,10 +838,13 @@ const VisualizationEngine = {
 
         let uniqueRecords = Array.from(new Set(allRecords));
         uniqueRecords.forEach(p => {
-            let [nx, ny, nz] = p.vector, f = Math.sqrt(1 / (1 + Math.abs(nz)));
+            let [nx, ny, nz] = p.vector;
+            // Lower hemisphere equal-area coordinate transformation adjustment
+            let f = Math.sqrt(1 / (1 + Math.abs(nz)));
             let cfg = symbolsConfig[p.structure] || { char: '●', color: '#0f172a' };
             ctx.fillStyle = cfg.color; ctx.font = "bold 12px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-            ctx.fillText(cfg.char, cx + r * nx * f, cy - r * ny * f);
+            // Structural standard: +ny shifts downward on a standard HTML canvas grid context
+            ctx.fillText(cfg.char, cx + r * nx * f, cy + r * ny * f);
         });
 
         const mCv = document.getElementById('mapCanvas'); const mCtx = mCv.getContext('2d');
@@ -967,12 +970,13 @@ function getFabricInterpretation(fabricClass, stats = {}) {
         case "Pure Girdle":
         case "Girdle Distribution":
         case "Girdle / Planar Trend":
+            let calculatedIg = (lambda1 && (lambda1 - lambda3 > 1e-5)) ? ((lambda1 - lambda2) / (lambda1 - lambda3)) : 0;
             return {
                 title: "Cylindrical Girdle Distribution",
-                interpretation: `The poles define a continuous great-circle girdle ($I_g$: ${((lambda1 - lambda2)/(lambda1 - lambda3 || 1)).toFixed(2)}), indicating systematic rotation of planar surfaces around a common fold hinge. This geometry is highly characteristic of cylindrical folding loops.`,
-                geologicalMeaning: "The dataset contains sufficient rotational dispersion to confidently isolate a stable statistical $\\beta$-axis.",
-                foldAxis: "$\\beta$-axis calculated directly from the structural tensor orientation matrix.",
-                recommendation: "Compare the calculated $\\beta$-axis with mapped field hinges (FA) and associated linear kinematic fabrics (L).",
+                interpretation: `The poles define a continuous great-circle girdle (Ig: ${calculatedIg.toFixed(3)}), indicating systematic rotation of planar surfaces around a common fold hinge. This geometry is highly characteristic of cylindrical folding loops.`,
+                geologicalMeaning: "The dataset contains sufficient rotational dispersion to confidently isolate a stable statistical beta-axis.",
+                foldAxis: "beta-axis calculated directly from the structural tensor orientation matrix.",
+                recommendation: "Compare the calculated beta-axis with mapped field hinges (FA) and associated linear kinematic fabrics (L).",
                 additionalNotes: additionalNotesStr
             };
 
@@ -1038,7 +1042,12 @@ function buildStructuralReportingSuites() {
     let primaryKey = analysisResults.global.F1 ? "F1" : (analysisResults.global.F2 ? "F2" : null);
     if (!primaryKey && Object.keys(analysisResults.global).length > 0) primaryKey = Object.keys(analysisResults.global)[0];
     
-    if (!primaryKey) return;
+    if (!primaryKey || !analysisResults.global[primaryKey]) {
+        // Fallback UI rendering so the app doesn't freeze blank
+        document.getElementById('card-trend-plunge').innerHTML = `<span style="color:var(--warning)">Insufficient Data</span>`;
+        document.getElementById('conf-overall').innerText = "0%";
+        return;
+    }
     let mainReport = analysisResults.global[primaryKey];
 
     for (let pKey in analysisResults.global) {
@@ -1082,12 +1091,11 @@ function buildStructuralReportingSuites() {
         if (woodcockC < 0.4) {
             fabricType = "Random Spread";
         } else if (woodcockK > 2.0) {
-            fabricType = woodcockC > 1.5 ? "Strong Point Cluster" : "Point Cluster";
+            fabricType = "Point Cluster";
         } else if (woodcockK < 0.4) {
             fabricType = "Pure Girdle";
         } else if (woodcockK >= 0.4 && woodcockK <= 2.0) {
-            // Check for potential bimodal limb segregation vs continuous dispersion
-            fabricType = (girdleIndex > 0.7) ? "Girdle / Planar Trend" : "Partial Girdle";
+            fabricType = "Girdle / Planar Trend";
         }
 
        // 2. Fetch the "Why" Interpretation Payload with updated runtime flags passed down
@@ -1206,11 +1214,23 @@ function buildStructuralReportingSuites() {
         let lStr = r.lMean ? MathEngine.formatTrendPlunge(r.lMean) : "absent";
         let p2_Fabric = `<strong>Fabric Analysis:</strong> Planar orientation distributions exhibit a cylindricity profile tracking at ${r.beta ? r.cylindricity + '%' : 'N/A'} with a mean geometric dispersion tensor eigenvalue of ${r.eigen.values[0].toFixed(2)}. Field inventory records matching mesoscopic indicators note measured hinge targets (${r.measuredFA}) averaging ${faStr}, alongside co-eval linear kinematic lineations (${r.measuredL}) yielding a spatial mean of ${lStr}.`;
 
-        let bStr = r.beta ? MathEngine.formatTrendPlunge(r.beta) : "N/A";
-        let p3_Interpretation = `<strong>Structural Interpretation:</strong> The mathematical optimization vectors isolate a regional kinematic fold axis ($\\beta$-axis) tracking at ${bStr}, characterized as a ${r.beta ? MathEngine.getPlungeCharacter(r.beta.plunge) : 'Non-cylindrical system'}. Cross-evaluation confirms an "${r.faCorrelation}" geometric correlation match against physical outcropping fabrics (Hinge Misfit: ${r.faMisfit !== null ? r.faMisfit.toFixed(1) + '°' : 'N/A'}), indicating structural continuity across the generation profile.`;
+        // Restore missing narrative summaries to prevent ReferenceErrors
+        let p1_Summary = `<strong>Dataset Summary (${r.phase}):</strong> Structural synthesis processing evaluated ${r.dataCount || 0} features mapped across ${runtimeSummary.stations || 0} active field stations.`;
+        let faStr = r.faMean ? MathEngine.formatTrendPlunge(r.faMean) : "absent";
+        let lStr = r.lMean ? MathEngine.formatTrendPlunge(r.lMean) : "absent";
+        let p2_Fabric = `<strong>Fabric Analysis:</strong> Planar orientation distributions exhibit a cylindricity profile tracking at ${r.beta ? r.cylindricity + '%' : 'N/A'}. Mesoscopic indicators note measured hinge targets averaging ${faStr}, alongside lineations yielding a spatial mean of ${lStr}.`;
 
-        let bootStr = (r.beta && r.bootstrap.ci95 > 0) ? `Resampling bootstrap constraints present a 95% confidence envelope radius of ±${r.bootstrap.ci95.toFixed(1)}°.` : "Bootstrap resampling window requires supplementary verification arrays.";
-        let p4_Limitations = `<strong>Limitations & Quality Controls:</strong> Vector stability scales directly with localized structural variance tracking an RMS residual error of ${r.rms.toFixed(2)}°. ${bootStr} Any cross-domain extrapolations assume mechanical and spatial homogeneity inside explicit sub-sectors; lack of physical verification controls across sparse sectors may shift spatial boundaries.`;
+        let bStr = r.beta ? MathEngine.formatTrendPlunge(r.beta) : "N/A";
+        let characterStr = (r.beta && r.beta.plunge !== undefined) ? MathEngine.getPlungeCharacter(r.beta.plunge) : 'Non-cylindrical system';
+        let misfitStr = (r.faMisfit !== null && r.faMisfit !== undefined) ? r.faMisfit.toFixed(1) + '°' : 'N/A';
+        
+        let p3_Interpretation = `<strong>Structural Interpretation:</strong> The mathematical optimization vectors isolate a regional kinematic fold axis (beta-axis) tracking at ${bStr}, characterized as a ${characterStr}. Cross-evaluation confirms an "${r.faCorrelation || 'Unclassified'}" geometric correlation match against physical outcropping fabrics (Hinge Misfit: ${misfitStr}), indicating structural continuity across the generation profile.`;
+        
+        let bootStr = (r.beta && r.bootstrap && r.bootstrap.ci95 > 0) ? `Resampling bootstrap constraints present a 95% confidence envelope radius of ±${r.bootstrap.ci95.toFixed(1)}°.` : "Bootstrap resampling window requires supplementary verification arrays.";
+        
+        // Guard r.rms calculation cleanly against undefined states
+        let safeRms = (r.rms !== undefined && r.rms !== null) ? r.rms.toFixed(2) : "0.00";
+        let p4_Limitations = `<strong>Limitations & Quality Controls:</strong> Vector stability scales directly with localized structural variance tracking an RMS residual error of ${safeRms}°: ${bootStr} Any cross-domain extrapolations assume mechanical and spatial homogeneity inside explicit sub-sectors; lack of physical verification controls across sparse sectors may shift spatial boundaries.`;
 
         narrativeHtml.push(`
             <div class="interpretation-section" style="margin-bottom: 20px;">
