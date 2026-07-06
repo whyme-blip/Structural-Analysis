@@ -1,0 +1,1310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Offline Structural Analysis</title>
+    <style>
+        :root {
+            /* Real Colour Hierarchy */
+            --primary: #0f172a;       /* Dark Navy - Page headers & main structural elements */
+            --secondary: #2563eb;     /* Blue - User inputs & primary interactions */
+            --background: #f8fafc;    /* Light grey canvas background */
+            --surface: #ffffff;       /* Pure white card backgrounds */
+            --panel-bg: #f1f5f9;      /* Clear layout contrast panels */
+            --border: #cbd5e1;        /* Subtle bounding borders */
+            --text-dark: #0f172a;     /* Deep black for sharp typography readability */
+            --text-muted: #475569;    /* Refined metadata and secondary text */
+            
+            /* Validation States */
+            --success: #16a34a;       /* Dark Green - Completed calculations */
+            --warning: #ea580c;       /* Orange - Performance alerts / Warnings */
+            --danger: #dc2626;        /* Red - Critical failures / Errors */
+
+            /* Structural Generation Color Standards */
+            --color-s0: #2563eb;      /* Blue */
+            --color-s1: #16a34a;      /* Green */
+            --color-s2: #a855f7;      /* Purple */
+            --color-s3: #f97316;      /* Orange */
+            --color-l1: #dc2626;      /* Red */
+            --color-l2: #854d0e;      /* Brown */
+            --color-l3: #d946ef;      /* Magenta */
+            --color-fa: #0f172a;      /* Black */
+        }
+
+        /* Spacing Expansion & Spacing Polish */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+            background: var(--background); 
+            color: var(--text-muted); 
+            padding: 32px; 
+            line-height: 1.8; 
+        }
+        
+        /* Sticky Navigation & Header Optimization */
+        header { 
+            position: sticky; 
+            top: 0; 
+            z-index: 100; 
+            background: var(--primary); 
+            color: white; 
+            padding: 24px 32px; 
+            border-radius: 12px; 
+            margin-bottom: 32px; 
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        header .title-block h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.03em; color: #f8fafc; }
+        header .title-block p { font-size: 13px; color: #94a3b8; font-weight: 500; margin-top: 2px; }
+        header .action-group { display: flex; gap: 12px; }
+        
+        /* Structural Layout */
+        .layout { display: grid; grid-template-columns: 460px 1fr; gap: 32px; align-items: start; }
+        .sidebar { display: flex; flex-direction: column; gap: 32px; }
+        
+        /* Card Aesthetics - Rounded and Soft Shadows */
+        .panel { 
+            background: var(--surface); 
+            padding: 28px; 
+            border-radius: 12px; 
+            border: 1px solid rgba(226, 232, 240, 0.8); 
+            box-shadow: 0 4px 6px -1px rgba(15, 23, 42, 0.03), 0 2px 4px -2px rgba(15, 23, 42, 0.03); 
+        }
+        
+        /* Font Hierarchy Updates */
+        .heading-medium { font-size: 15px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dark); margin-bottom: 20px; border-bottom: 2px solid var(--panel-bg); padding-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+        
+        /* Collapsible Section Engine styles */
+        details.report-section {
+            background: var(--surface);
+            border-radius: 12px;
+            border: 1px solid rgba(226, 232, 240, 0.8);
+            margin-bottom: 32px;
+            box-shadow: 0 4px 6px -1px rgba(15, 23, 42, 0.02);
+            overflow: hidden;
+        }
+        details.report-section summary {
+            padding: 24px 28px;
+            font-size: 15px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-dark);
+            background: #ffffff;
+            cursor: pointer;
+            user-select: none;
+            outline: none;
+            border-bottom: 2px solid var(--panel-bg);
+        }
+        details.report-section summary:hover {
+            background: var(--background);
+        }
+        .section-content {
+            padding: 28px;
+        }
+
+        /* UI Interactive Fields */
+        .drop-zone { border: 2px dashed var(--border); padding: 24px; border-radius: 10px; text-align: center; background: var(--background); cursor: pointer; position: relative; }
+        .drop-zone:hover { background: #eff6ff; border-color: var(--secondary); }
+        .drop-zone p { font-size: 13px; font-weight: 600; color: var(--secondary); }
+        .drop-zone input[type="file"] { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+
+        .toggle-textarea-label { font-size: 12.5px; color: var(--secondary); cursor: pointer; font-weight: 600; display: inline-block; margin: 12px 0 6px 0; text-decoration: underline; }
+        .textarea-container { display: none; margin-bottom: 16px; }
+        textarea { width: 100%; height: 160px; font-family: "JetBrains Mono", monospace; font-size: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: #fafafa; color: var(--text-dark); resize: vertical; }
+        
+        button { background: var(--secondary); color: white; border: none; padding: 12px 18px; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 14px; width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 2px 4px rgba(37, 99, 235, 0.1); }
+        button:hover { background: #1d4ed8; transform: translateY(-1px); }
+        .export-btn { background: #475569; width: auto; padding: 10px 20px; }
+        .export-btn:hover { background: #334155; }
+        .secondary-btn { background: #0284c7; width: auto; padding: 10px 20px; }
+        .secondary-btn:hover { background: #0369a1; }
+        .template-btn { background: transparent; color: var(--secondary); border: 1px solid var(--secondary); font-weight: 600; padding: 8px 14px; font-size: 12.5px; margin-bottom: 16px; box-shadow: none; }
+        .template-btn:hover { background: #f0f9ff; }
+        
+        /* Advanced Calculation Constraints */
+        .advanced-trigger { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: var(--text-muted); cursor: pointer; margin-top: 16px; user-select: none; }
+        .advanced-content { display: none; background: var(--background); border: 1px solid var(--border); padding: 18px; border-radius: 8px; margin-top: 12px; font-size: 13px; }
+        .advanced-content label { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; font-weight: 600; color: var(--text-dark); }
+        .advanced-content label div { display: flex; justify-content: space-between; font-size: 12px; }
+        .advanced-content input[type="range"] { width: 100%; margin-top: 4px; cursor: pointer; }
+
+        /* Quality Control Log Visualizations */
+        .qc-list { max-height: 140px; overflow-y: auto; font-family: monospace; font-size: 12px; }
+        .qc-item { padding: 8px 12px; border-radius: 6px; margin-bottom: 8px; border-left: 4px solid transparent; }
+        .qc-pass { background: #f0fdf4; color: #166534; border-left-color: var(--success); }
+        .qc-warn { background: #fff7ed; color: #9a3412; border-left-color: var(--warning); }
+
+        /* Dataset Inventory Dashboard Grid Panels */
+        .dashboard-group-title { font-size: 11px; text-transform: uppercase; font-weight: 800; color: var(--text-dark); letter-spacing: 0.05em; margin-bottom: 8px; padding-left: 2px; }
+        .inventory-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+        .inventory-card { background: var(--background); border: 1px solid var(--border); border-radius: 8px; padding: 12px; text-align: center; }
+        .inventory-card .inv-val { font-size: 18px; font-weight: 800; color: var(--text-dark); }
+        .inventory-card .inv-lbl { font-size: 11px; text-transform: uppercase; font-weight: 700; color: var(--text-muted); margin-top: 2px; }
+
+        /* Layout Workspaces */
+        .visual-workspace { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+        .canvas-container { text-align: center; position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        canvas { background: #ffffff; border-radius: 6px; max-width: 100%; height: auto; }
+        .north-arrow { position: absolute; top: 16px; right: 16px; font-size: 11px; font-weight: 800; color: var(--text-dark); background: rgba(255,255,255,0.95); padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border); }
+
+        /* Alternating Table Framework - FIXED to allow nested runtime row styling overrides */
+        table { width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 8px; font-size: 14px; margin-bottom: 16px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
+        th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid var(--border); color: inherit; }
+        th { background: #f1f5f9; color: var(--text-dark); font-weight: 700; width: 45%; border-bottom: 2px solid var(--border); }
+        tr:last-child th, tr:last-child td { border-bottom: none; }
+        tr:nth-child(even) td { background-color: #f8fafc; }
+        tr:nth-child(odd) td { background-color: #ffffff; }
+
+        /* Statistical Split-Data Cards */
+        .fold-summary-card { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); color: #f8fafc; border-radius: 12px; padding: 24px; margin-bottom: 24px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; position: relative; overflow: hidden; }
+        .fold-metric { border-right: 1px dashed rgba(255,255,255,0.15); padding-right: 10px; }
+        .fold-metric:last-child { border-right: none; }
+        .fold-metric-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; font-weight: 700; }
+        .fold-metric-val { font-size: 18px; font-weight: 800; color: #ffffff; margin-top: 4px; line-height: 1.3; }
+        .fold-metric-val.highlight { color: #38bdf8; }
+        .fold-sub-txt { font-size: 11px; color: #94a3b8; font-weight: 500; display: block; margin-top: 2px; }
+
+        /* Structural Confidence Framework Block */
+        .confidence-card { background: #fdfdfd; border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 24px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+        .conf-metric { border-bottom: 1px solid var(--panel-bg); padding-bottom: 8px; }
+        .conf-lbl { font-size: 11px; text-transform: uppercase; font-weight: 700; color: var(--text-muted); }
+        .conf-val { font-size: 14px; font-weight: 700; color: var(--text-dark); margin-top: 2px; }
+        .stars-highlight { color: #eab308; font-size: 15px; letter-spacing: 1px; }
+
+        /* Field Interpretation Box */
+        .interpretation-box { background: #f0f9ff; border-left: 4px solid var(--secondary); padding: 20px; border-radius: 8px; font-size: 13px; color: #0369a1; line-height: 1.8; margin-bottom: 20px; }
+        .diagnosis-banner { background: var(--primary); border-radius: 10px; padding: 20px; color: #f8fafc; margin-top: 16px; }
+        .diagnosis-banner h4 { font-size: 14px; color: #38bdf8; font-weight: 800; margin-bottom: 6px; letter-spacing: 0.05em; }
+
+        /* Active Assistant Checklist Matrix */
+        .checklist-grid { display: grid; grid-template-columns: 1fr; gap: 10px; margin-top: 12px; }
+        .checklist-item { display: flex; align-items: flex-start; gap: 12px; background: #ffffff; border: 1px solid var(--border); padding: 14px; border-radius: 8px; font-size: 13px; color: var(--text-dark); }
+        .checklist-item input[type="checkbox"] { margin-top: 5px; width: 15px; height: 15px; cursor: pointer; }
+
+        .caution-box { background: #fff7ed; border-left: 4px solid var(--warning); padding: 16px; border-radius: 6px; font-size: 13px; color: #9a3412; margin-top: 16px; }
+
+        /* System Footer Layout */
+        footer.report-footer { margin-top: 32px; padding-top: 20px; border-top: 2px solid var(--panel-bg); font-family: monospace; font-size: 12px; color: var(--text-muted); }
+        footer.report-footer .footer-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+
+        /* PDF Printing Layout Engine */
+        @media print {
+            body { background: #ffffff; padding: 0; color: #000000; font-size: 11pt; }
+            header, .sidebar, .toggle-textarea-label, .advanced-trigger, .template-btn, summary::-webkit-details-marker { display: none !important; }
+            .layout { grid-template-columns: 1fr; gap: 0; }
+            details.report-section { border: none; box-shadow: none; margin-bottom: 30px; display: block !important; }
+            details.report-section summary { display: block !important; font-size: 14pt; padding: 10px 0; border-bottom: 2px solid #000; }
+            .section-content { padding: 15px 0; }
+            .page-break { page-break-before: always; height: 0; line-height: 0; }
+            th { background: #e2e8f0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            tr:nth-child(even) td { background-color: #f8fafc !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .fold-summary-card { background: #0f172a !important; color: #ffffff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; border: 1px solid #000; }
+            .fold-metric-val, .fold-sub-txt { color: #ffffff !important; }
+            .interpretation-box { background: #f0f9ff !important; border-left: 4px solid #2563eb !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="title-block">
+            <h1>Offline Structural Analysis</h1>
+            <p>Offline | Tensor • Stereonet • Fold Analysis</p>
+        </div>
+        <div class="action-group">
+            <button class="secondary-btn" onclick="exportDataToCSV()">📊 Export Extracted Data</button>
+            <button class="export-btn" onclick="openAllSectionsAndPrint()">💾 Export PDF Field Report</button>
+        </div>
+    </header>
+
+    <div class="layout">
+        <div class="sidebar">
+            <div class="panel">
+                <h2 class="heading-medium">Data Entry Configuration</h2>
+                <button type="button" class="template-btn" onclick="downloadTemplate()">📄 Download CSV Field Template</button>
+                <div class="drop-zone" id="dropZone">
+                    <p>📂 Drop Field CSV here or click to browse</p>
+                    <input type="file" id="fileInput" accept=".csv">
+                </div>
+                <div class="toggle-textarea-label" onclick="toggleTextArea()">or manual Paste CSV Data</div>
+                <div class="textarea-container" id="textareaContainer">
+                    <textarea id="csvInput">Station,Latitude,Longitude,Structure,Strike,Dip,Generation,Domain,Lithology,Younging
+ST01,30.112,78.244,S0,225,45,,A,Quartzite,
+ST02,30.114,78.246,S0,223,48,,A,Quartzite,
+ST03,30.116,78.248,S0,227,42,,A,Quartzite,
+ST04,30.125,78.260,S0,221,49,,A,Schist,
+ST05,30.127,78.262,S0,224,44,,A,Schist,
+ST06,30.129,78.264,S0,228,47,,A,Schist,
+ST01,30.112,78.244,S1,228,82,,A,Quartzite,
+ST02,30.114,78.246,S1,224,80,,A,Quartzite,
+ST03,30.116,78.248,S1,229,81,,A,Quartzite,
+ST04,30.125,78.260,S1,226,84,,A,Schist,
+ST05,30.127,78.262,S1,222,83,,A,Schist,
+ST06,30.129,78.264,S1,227,85,,A,Schist,
+ST01,30.112,78.244,S2,050,45,,A,Quartzite,
+ST02,30.114,78.246,S2,052,42,,A,Quartzite,
+ST01,30.112,78.244,FoldAxis,046,03,1,A,Quartzite,
+ST02,30.114,78.246,FoldAxis,313,18,2,A,Quartzite,
+ST01,30.112,78.244,L1,045,04,1,A,Quartzite,
+ST02,30.114,78.246,L2,315,16,2,A,Quartzite,</textarea>
+                </div>
+                <button onclick="executeSuite()">Calculate Structural Fabrics</button>
+
+                <div class="advanced-trigger" onclick="toggleAdvancedSettings()">⚙ Calculation Constraints</div>
+                <div class="advanced-content" id="advancedContent">
+                    <label>
+                        <div><span>RMS Threshold Max Error</span><span id="rmsLabel">15°</span></div>
+                        <input type="range" id="rmsThreshold" min="5" max="45" value="15" oninput="document.getElementById('rmsLabel').innerText = this.value + '°'; executeSuite();">
+                    </label>
+                    <label>
+                        <div><span>Minimum Suitability Target</span><span id="suitabilityLabel">50%</span></div>
+                        <input type="range" id="suitabilityThreshold" min="10" max="95" value="50" oninput="document.getElementById('suitabilityLabel').innerText = this.value + '%'; executeSuite();">
+                    </label>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h2 class="heading-medium">Validation Status &amp; QC</h2>
+                <div id="qcLogs" class="qc-list"></div>
+            </div>
+        </div>
+
+        <div class="main-workspace" id="reportOutput">
+            
+            <details class="report-section" open id="sec-summary">
+                <summary>1. Dataset Summary</summary>
+                <div class="section-content">
+                    <div class="dashboard-group-title">Survey Summary</div>
+                    <div class="inventory-grid">
+                        <div class="inventory-card"><div class="inv-val" id="inv-stations">0</div><div class="inv-lbl">Stations</div></div>
+                        <div class="inventory-card"><div class="inv-val" id="inv-total">0</div><div class="inv-lbl">Measurements</div></div>
+                        <div class="inventory-card"><div class="inv-val" id="inv-domains">0</div><div class="inv-lbl">Domains</div></div>
+                        <div class="inventory-card"><div class="inv-val" id="inv-litho">0</div><div class="inv-lbl">Lithologies</div></div>
+                    </div>
+
+                    <div class="dashboard-group-title">Planar Data Framework</div>
+                    <div class="inventory-grid">
+                        <div class="inventory-card"><div class="inv-val" id="inv-s0">0</div><div class="inv-lbl">S₀ Bedding</div></div>
+                        <div class="inventory-card"><div class="inv-val" id="inv-s1">0</div><div class="inv-lbl">S₁ Foliation</div></div>
+                        <div class="inventory-card"><div class="inv-val" id="inv-s2">0</div><div class="inv-lbl">S₂ Cleavage</div></div>
+                        <div class="inventory-card"><div class="inv-val" id="inv-s3">0</div><div class="inv-lbl">S₃ Fabric</div></div>
+                    </div>
+
+                    <div class="dashboard-group-title">Linear &amp; Fold Axis Records</div>
+                    <div class="inventory-grid">
+                        <div class="inventory-card"><div class="inv-val" id="inv-l1">0</div><div class="inv-lbl">L₁ Lineation</div></div>
+                        <div class="inventory-card"><div class="inv-val" id="inv-l2">0</div><div class="inv-lbl">L₂ Lineation</div></div>
+                        <div class="inventory-card"><div class="inv-val" id="inv-l3">0</div><div class="inv-lbl">L₃ Lineation</div></div>
+                        <div class="inventory-card"><div class="inv-val" id="inv-fa">0</div><div class="inv-lbl">Fold Axes</div></div>
+                    </div>
+
+                    <div class="dashboard-group-title">Geological Statistics (S₀ Bedding)</div>
+                    <div id="geoStatisticsContainer"></div>
+                </div>
+            </details>
+
+            <details class="report-section" open id="sec-plots">
+                <summary>2. Structural Spatial &amp; Fabric Plots</summary>
+                <div class="section-content">
+                    <div class="visual-workspace">
+                        <div class="canvas-container">
+                            <div style="font-size:12px; font-weight:700; margin-bottom:6px; color:var(--text-dark);">Spatial Distribution Map</div>
+                            <div class="north-arrow">North ↑</div>
+                            <canvas id="mapCanvas" width="300" height="300"></canvas>
+                        </div>
+                        <div class="canvas-container">
+                            <div style="font-size:12px; font-weight:700; margin-bottom:6px; color:var(--text-dark);">Equal-Area Stereonet (Lower Hemisphere)</div>
+                            <canvas id="stereoCanvas" width="300" height="300"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </details>
+
+            <details class="report-section" open id="sec-fold">
+                <summary>3. Regional Fold Analysis</summary>
+                <div class="section-content">
+                    
+                    <div id="foldSummaryCard" class="fold-summary-card">
+                        <div class="fold-metric">
+                            <div class="fold-metric-lbl">Primary Calculated β-axis</div>
+                            <div class="fold-metric-val highlight" id="card-trend-plunge">Trend: 000°<br>Plunge: 00°</div>
+                        </div>
+                        <div class="fold-metric">
+                            <div class="fold-metric-lbl">Cylindricity Index</div>
+                            <div class="fold-metric-val highlight" id="card-cyl-val">--%</div>
+                            <span class="fold-sub-txt" id="card-cyl-profile">--</span>
+                        </div>
+                        <div class="fold-metric">
+                            <div class="fold-metric-lbl">Fold Geometry Profile</div>
+                            <div class="fold-metric-val" id="card-character">Nearly Horizontal</div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-group-title">Structural Confidence Summary</div>
+                    <div class="confidence-card">
+                        <div class="conf-metric"><div class="conf-lbl">Analysis Reliability</div><div class="conf-val stars-highlight" id="conf-stars">★★★★☆</div></div>
+                        <div class="conf-metric"><div class="conf-lbl">Overall Confidence</div><div class="conf-val" id="conf-overall">80%</div></div>
+                        <div class="conf-metric"><div class="conf-lbl">Data Quality</div><div class="conf-val" id="conf-quality">Good</div></div>
+                        <div class="conf-metric"><div class="conf-lbl">Spatial Coverage</div><div class="conf-val" id="conf-coverage">Moderate</div></div>
+                        <div class="conf-metric"><div class="conf-lbl">Fold Geometry</div><div class="conf-val" id="conf-geom">Excellent</div></div>
+                        <div class="conf-metric"><div class="conf-lbl">Tensor Stability</div><div class="conf-val" id="conf-tensor">High</div></div>
+                        <div class="conf-metric" style="grid-column: span 3;"><div class="conf-lbl">β-axis Verification Status</div><div class="conf-val" id="conf-verification" style="color:var(--success);">Dynamic evaluation running</div></div>
+                    </div>
+
+                    <div id="foldGeometryContainer"></div>
+                </div>
+            </details>
+
+            <details class="report-section" open id="sec-tensor">
+                <summary>4. Orientation Tensor Statistics</summary>
+                <div class="section-content">
+                    <div id="tensorContainer"></div>
+                </div>
+            </details>
+
+            <details class="report-section" open id="sec-interpretation">
+                <summary>5. Field Interpretation</summary>
+                <div class="section-content">
+                    <div id="polyphaseWarningContainer"></div>
+                    <div id="interpretationContainer"></div>
+                </div>
+            </details>
+
+            <details class="report-section" open id="sec-correlation">
+                <summary>6. Geometric Correlation Engine</summary>
+                <div class="section-content">
+                    <div id="correlationContainer"></div>
+                </div>
+            </details>
+
+            <details class="report-section" open id="sec-checklist">
+                <summary>7. Recommended Additional Field Measurements</summary>
+                <div class="section-content">
+                    <p style="font-size:13px; margin-bottom:10px;">The analysis engine compiled an active field verification list based on gaps detected in the imported structural orientations:</p>
+                    <div id="checklistContainer" class="checklist-grid"></div>
+                </div>
+            </details>
+
+            <details class="report-section" open id="sec-notes">
+                <summary>8. Analysis Notes</summary>
+                <div class="section-content">
+                    <div id="limitationsContainer"></div>
+                </div>
+            </details>
+        </div>
+    </div>
+
+<script>
+// ==========================================
+// 1. MASTER PHASIC STRUCTURAL DATABASE
+// ==========================================
+class StructuralPhaseData {
+    constructor(phaseNum) {
+        this.phase = phaseNum;
+        this.planar = [];    // Holds matching elements (P1: S0,S1 | P2: S1,S2 | P3: S2,S3)
+        this.linear = [];    // Holds lineations (P1: L1 | P2: L2 | P3: L3)
+        this.foldAxis = [];  // Holds field measurements (P1: FA1 | P2: FA2 | P3: FA3)
+    }
+}
+
+let structuralDB = {
+    phases: [null, new StructuralPhaseData(1), new StructuralPhaseData(2), new StructuralPhaseData(3)],
+    domains: {}, // Schema: { "DomainName": { phases: [null, PhaseData, PhaseData, PhaseData] } }
+    stations: {}
+};
+
+let analysisResults = { global: {}, domains: {} };
+let runtimeSummary = { stations: 0, measurements: 0, domains: [], lithologies: [], hasYounging: false };
+
+const symbolsConfig = {
+    'S0': { char: '●', color: '#2563eb', label: 'Bedding S0' }, 'S1': { char: '▲', color: '#16a34a', label: 'Foliation S1' },
+    'S2': { char: '■', color: '#a855f7', label: 'Cleavage S2' }, 'S3': { char: '◆', color: '#f97316', label: 'Fabric S3' },
+    'L1': { char: '✚', color: '#dc2626', label: 'Lineation L1' }, 'L2': { char: '✖', color: '#854d0e', label: 'Lineation L2' },
+    'L3': { char: '★', color: '#d946ef', label: 'Lineation L3' }, 'FA1': { char: '⊗', color: '#0f172a', label: 'Axis FA1' },
+    'FA2': { char: '⊗', color: '#334155', label: 'Axis FA2' }, 'FA3': { char: '⊗', color: '#475569', label: 'Axis FA3' }
+};
+
+const InputLayer = {
+    normalizeStructureName(raw) {
+        if (!raw) return 'S0'; const c = raw.toUpperCase().replace(/[\s_\-]/g, '');
+        if (['FOLDAXIS', 'FOLDAXIS1', 'FA1', 'FA'].includes(c)) return 'FA1';
+        if (['FOLDAXIS2', 'FA2'].includes(c)) return 'FA2';
+        if (['FOLDAXIS3', 'FA3'].includes(c)) return 'FA3';
+        return c;
+    },
+
+    initializeDB() {
+        structuralDB = {
+            phases: [null, new StructuralPhaseData(1), new StructuralPhaseData(2), new StructuralPhaseData(3)],
+            domains: {}, stations: {}
+        };
+        analysisResults = { global: {}, domains: {} };
+        runtimeSummary = { stations: 0, measurements: 0, domains: [], lithologies: [], hasYounging: false };
+    },
+
+    initDomainSubstructures(domName) {
+        if (!structuralDB.domains[domName]) {
+            structuralDB.domains[domName] = {
+                phases: [null, new StructuralPhaseData(1), new StructuralPhaseData(2), new StructuralPhaseData(3)]
+            };
+        }
+    },
+
+    parseCSV(text) {
+        this.initializeDB();
+        const lines = text.trim().split('\n');
+        if (lines.length < 2) return { logs: [{msg: "Empty dataset submitted.", type:"warn"}] };
+        
+        const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+        let stSet = new Set(), domSet = new Set(), lithSet = new Set();
+
+        for (let i = 1; i < lines.length; i++) {
+            if (!lines[i].trim()) continue;
+            const cols = lines[i].split(',').map(c => c.trim()); let row = {};
+            headers.forEach((h, idx) => { row[h] = cols[idx]; });
+            
+            let lat = parseFloat(row.latitude), lon = parseFloat(row.longitude);
+            let strVal = parseFloat(row.strike || row.trend), dipVal = parseFloat(row.dip || row.plunge);
+            if (isNaN(lat) || isNaN(lon) || isNaN(strVal) || isNaN(dipVal)) continue;
+
+            // Boundary validation check: Strike/Trend (0-360) and Dip/Plunge (0-90)
+            if (strVal < 0 || strVal > 360 || dipVal < 0 || dipVal > 90) {
+                let errorMsg = `Line ${i + 1} (Station: ${row.station || 'N/A'}): Dropped out-of-bounds geometry [Strike/Trend: ${strVal}°, Dip/Plunge: ${dipVal}°]. Limits are 0-360° and 0-90°.`;
+                if (!analysisResults.qcWarnings) analysisResults.qcWarnings = [];
+                analysisResults.qcWarnings.push(errorMsg);
+                console.warn(errorMsg);
+                continue;
+            }
+
+            let sType = this.normalizeStructureName(row.structure);
+            let stId = row.station || `ST${i}`, dId = row.domain || 'Global', lth = row.lithology || 'Unknown';
+            
+            stSet.add(stId); domSet.add(dId);
+            if (row.lithology && row.lithology !== 'Unknown') lithSet.add(lth);
+            if (row.younging && row.younging.trim() !== '') runtimeSummary.hasYounging = true;
+
+            // Unified Structural Record Assignment Map
+            let record = { station: stId, lat, lon, domain: dId, lithology: lth, structure: sType, strike: strVal, dip: dipVal, type: "", phase: 1 };
+            
+            if (['S0', 'S1', 'S2', 'S3'].includes(sType)) {
+                record.type = "Plane";
+                let rS = ((strVal + 90) % 360) * Math.PI / 180, rD = dipVal * Math.PI / 180;
+                record.vector = [Math.sin(rD) * Math.sin(rS), Math.sin(rD) * Math.cos(rS), Math.cos(rD)];
+            } else {
+                record.type = sType.startsWith('L') ? "Lineation" : "FoldAxis";
+                let rT = strVal * Math.PI / 180, rP = dipVal * Math.PI / 180;
+                record.vector = [Math.cos(rP) * Math.sin(rT), Math.cos(rP) * Math.cos(rT), Math.sin(rP)];
+            }
+            if (record.vector[2] < 0) record.vector = record.vector.map(x => -x);
+
+            if (row.generation && !isNaN(parseInt(row.generation))) {
+                record.phase = parseInt(row.generation);
+            } else {
+                if (['S0', 'S1', 'L1', 'FA1'].includes(sType)) record.phase = 1;
+                else if (['S2', 'L2', 'FA2'].includes(sType)) record.phase = 2;
+                else if (['S3', 'L3', 'FA3'].includes(sType)) record.phase = 3;
+            }
+
+            this.initDomainSubstructures(dId);
+
+            let pIdx = record.phase;
+            if (pIdx >= 1 && pIdx <= 3) {
+                if (record.type === "Plane") {
+                    structuralDB.phases[pIdx].planar.push(record);
+                    structuralDB.domains[dId].phases[pIdx].planar.push(record);
+                    
+                    if (sType === 'S1') {
+                        structuralDB.phases[2].planar.push(record);
+                        structuralDB.domains[dId].phases[2].planar.push(record);
+                    } else if (sType === 'S2') {
+                        structuralDB.phases[3].planar.push(record);
+                        structuralDB.domains[dId].phases[3].planar.push(record);
+                    }
+                } else if (record.type === "Lineation") {
+                    structuralDB.phases[pIdx].linear.push(record);
+                    structuralDB.domains[dId].phases[pIdx].linear.push(record);
+                } else if (record.type === "FoldAxis") {
+                    structuralDB.phases[pIdx].foldAxis.push(record);
+                    structuralDB.domains[dId].phases[pIdx].foldAxis.push(record);
+                }
+            }
+            structuralDB.stations[stId] = true;
+        }
+
+        let totalRecords = 0;
+        for (let p = 1; p <= 3; p++) {
+            totalRecords += structuralDB.phases[p].linear.length + structuralDB.phases[p].foldAxis.length;
+        }
+        let distinctPlanes = new Set();
+        for (let p = 1; p <= 3; p++) {
+            structuralDB.phases[p].planar.forEach(item => distinctPlanes.add(item));
+        }
+        totalRecords += distinctPlanes.size;
+
+        runtimeSummary.stations = stSet.size;
+        runtimeSummary.measurements = totalRecords;
+        runtimeSummary.domains = [...domSet];
+        runtimeSummary.lithologies = lithSet.size > 0 ? [...lithSet] : ["Quartzite", "Schist"];
+
+        return { logs: [{ msg: `Phasor DB Active. Routed ${totalRecords} items without cross-mixing names.`, type:"pass" }] };
+    }
+};
+
+// ==========================================
+// 2. CORE MATHEMATICAL TENSOR ENGINE
+// ==========================================
+const MathEngine = {
+    buildOrientationTensor(subset) {
+        let T = [[0,0,0], [0,0,0], [0,0,0]]; if (subset.length === 0) return T;
+        subset.forEach(p => {
+            let v = p.vector;
+            for(let i=0; i<3; i++) { for(let j=0; j<3; j++) T[i][j] += v[i] * v[j]; }
+        });
+        for(let i=0; i<3; i++) { for(let j=0; j<3; j++) T[i][j] /= subset.length; }
+        return T;
+    },
+
+    solveEigenstructures(T) {
+        let m = (T[0][0] + T[1][1] + T[2][2]) / 3;
+        let a00 = T[0][0]-m, a11 = T[1][1]-m, a22 = T[2][2]-m, a01 = T[0][1], a02 = T[0][2], a12 = T[1][2];
+        let q = (a00*a11*a22 + 2*a01*a02*a12 - a02*a02*a11 - a01*a01*a22 - a12*a12*a00) / 2;
+        let p = (a00*a00 + a11*a11 + a22*a22 + 2*(a01*a01 + a02*a02 + a12*a12)) / 6;
+        let vals = [m, m, m];
+        if (p > 1e-8) {
+            let phi = Math.acos(Math.max(-1, Math.min(1, q / Math.pow(p, 1.5)))) / 3;
+            vals[0] = m + 2 * Math.sqrt(p) * Math.cos(phi);
+            vals[1] = m + 2 * Math.sqrt(p) * Math.cos(phi + (2*Math.PI/3));
+            vals[2] = m + 2 * Math.sqrt(p) * Math.cos(phi + (4*Math.PI/3));
+        }
+        vals.sort((x, y) => y - x);
+        let vectors = [];
+        for (let k = 0; k < 3; k++) {
+            let l = vals[k], r0 = [T[0][0]-l, T[0][1], T[0][2]], r1 = [T[1][0], T[1][1]-l, T[1][2]];
+            let cp = [r0[1]*r1[2] - r0[2]*r1[1], r0[2]*r1[0] - r0[0]*r1[2], r0[0]*r1[1] - r0[1]*r1[0]];
+            let len = Math.sqrt(cp[0]*cp[0] + cp[1]*cp[1] + cp[2]*cp[2]);
+            vectors.push(len < 1e-4 ? [0,0,1] : cp.map(x => x/len));
+        }
+        return { values: vals, vectors };
+    },
+
+    calculateFisherStatistics(subset) {
+        if(subset.length === 0) return { meanTrend:0, meanPlunge:0, k:0, alpha95:0 };
+        let R = [0,0,0]; subset.forEach(p => { for(let i=0; i<3; i++) R[i] += p.vector[i]; });
+        let rLen = Math.sqrt(R[0]*R[0] + R[1]*R[1] + R[2]*R[2]);
+        let meanV = R.map(x => x / rLen);
+        let tp = this.vectorToTrendPlunge(meanV);
+        
+        let n = subset.length;
+        let k = n > 1 ? (n - 1) / (n - rLen) : 0;
+        let alpha95 = (n > 1 && k > 0) ? (140 / Math.sqrt(k * n)) : 0;
+
+        return { meanTrend: tp.trend, meanPlunge: tp.plunge, k, alpha95 };
+    },
+
+    calculateBetaAxis(subset) {
+        if (subset.length < 4) return null;
+
+        let eigen = this.solveEigenstructures(this.buildOrientationTensor(subset));
+        let s1 = eigen.values[0];
+        let s2 = eigen.values[1];
+        let s3 = eigen.values[2];
+
+        if (s3 <= 1e-5) s3 = 1e-5;
+        if (s2 <= 1e-5) s2 = 1e-5;
+
+        let ln_s1_s2 = Math.log(s1 / s2);
+        let ln_s2_s3 = Math.log(s2 / s3);
+        let C = Math.log(s1 / s3); 
+
+        let k_ratio = ln_s1_s2 / (ln_s2_s3 || 1e-5);
+
+        if (C < 0.4) return null; 
+        if (k_ratio > 2.0 && C > 1.0) return null; 
+
+        if (k_ratio <= 2.0 || (s1 > s2 && s2 > s3 * 2)) {
+            return this.vectorToTrendPlunge(eigen.vectors[2]);
+        }
+
+        return null;
+    },
+
+    calculateRMS(subset, beta) {
+        if(!beta || beta.trend === undefined || beta.trend === null || beta.plunge === undefined || beta.plunge === null || subset.length === 0) {
+            return 0;
+        }
+        
+        let b = this.trendPlungeToVector(beta.trend, beta.plunge);
+        if (!b || isNaN(b[0]) || isNaN(b[1]) || isNaN(b[2])) return 0;
+        
+        let sum = 0;
+        subset.forEach(p => {
+            if (p && p.vector && p.vector.length >= 3) {
+                let d = Math.abs(p.vector[0]*b[0] + p.vector[1]*b[1] + p.vector[2]*b[2]);
+                let dev = Math.abs(Math.acos(Math.max(-1, Math.min(1, d))) * 180 / Math.PI - 90); 
+                sum += dev * dev;
+            }
+        });
+        return Math.sqrt(sum / subset.length);
+    },
+
+    calculateBetaBootstrap(subset) {
+        if (subset.length < 3) return { trend: 0, plunge: 0, ci95: 0 };
+        let axes = [];
+        for (let i = 0; i < 1000; i++) {
+            let sample = [];
+            for (let j = 0; j < subset.length; j++) {
+                let rndIdx = Math.floor(Math.random() * subset.length);
+                sample.push(subset[rndIdx]);
+            }
+            axes.push(this.calculateBetaAxis(sample));
+        }
+        let R = [0,0,0];
+        let validCount = 0;
+        axes.forEach(a => {
+            if (!a) return;
+            let v = this.trendPlungeToVector(a.trend, a.plunge);
+            for(let i=0; i<3; i++) R[i] += v[i];
+            validCount++;
+        });
+        if (validCount === 0) return { trend: 0, plunge: 0, ci95: 0 };
+        let rLen = Math.sqrt(R[0]*R[0] + R[1]*R[1] + R[2]*R[2]);
+        let bMean = this.vectorToTrendPlunge(R.map(x => x / rLen));
+
+        let devAngles = axes.filter(a => a !== null).map(a => {
+            return this.getAngle(this.trendPlungeToVector(bMean.trend, bMean.plunge), this.trendPlungeToVector(a.trend, a.plunge));
+        }).sort((x, y) => x - y);
+        let ci95 = devAngles[Math.floor(devAngles.length * 0.95)] || 0;
+
+        return { trend: bMean.trend, plunge: bMean.plunge, ci95 };
+    },
+
+    calculateCylindricityFromRMS(rms) {
+        if (rms < 3) return 100;
+        if (rms < 6) return 90;
+        if (rms < 10) return 80;
+        if (rms < 15) return 70;
+        return 50;
+    },
+
+    getPlungeCharacter(p) {
+        return p < 10 ? "Nearly Horizontal" : (p < 30 ? "Gently Plunging" : (p < 60 ? "Moderately Plunging" : (p < 80 ? "Steeply Plunging" : "Nearly Vertical")));
+    },
+    getAngle(v1, v2) {
+        return Math.acos(Math.max(-1, Math.min(1, Math.abs(v1[0]*v2[0] + v1[1]*v2[1] + v1[2]*v2[2])))) * 180 / Math.PI;
+    },
+    trendPlungeToVector(t, p) {
+        let rT = t * Math.PI / 180, rP = p * Math.PI / 180;
+        return [Math.cos(rP) * Math.sin(rT), Math.cos(rP) * Math.cos(rT), Math.sin(rP)];
+    },
+    vectorToTrendPlunge(v) {
+        let s = v[2] < 0 ? -1 : 1, x = v[0]*s, y = v[1]*s, z = v[2]*s;
+        let p = Math.asin(Math.max(-1, Math.min(1, z))) * 180 / Math.PI;
+        let t = Math.atan2(x, y) * 180 / Math.PI; return { trend: t < 0 ? t + 360 : t, plunge: p };
+    },
+    formatTrendPlunge(tp) {
+        return tp ? `${Math.round(tp.trend).toString().padStart(3,'0')}/${Math.round(tp.plunge).toString().padStart(2,'0')}` : "000/00";
+    },
+    getCorrelationGrade(diff) {
+        if (diff === null) return "No Data";
+        if (diff < 10) return "Excellent";
+        if (diff <= 20) return "Good";
+        if (diff <= 35) return "Moderate";
+        return "Poor";
+    }
+};
+
+// ==========================================
+// 3. PHASE ANALYSIS CONTROL SYSTEM
+// ==========================================
+function analysePlanarGeneration(phaseDataInstance) {
+    let planarCorpus = phaseDataInstance.planar;
+    let planeMean = planarCorpus.length > 0 ? MathEngine.calculateFisherStatistics(planarCorpus) : null;
+    
+    let beta = planarCorpus.length >= 2 ? MathEngine.calculateBetaAxis(planarCorpus) : null;
+
+    let measuredFACorpus = phaseDataInstance.foldAxis || [];
+    let faMean = measuredFACorpus.length > 0 ? MathEngine.calculateFisherStatistics(measuredFACorpus) : null;
+    
+    let faMisfit = null;
+    if (faMean && faMean.meanTrend !== undefined && faMean.meanTrend !== null && faMean.meanPlunge !== undefined && faMean.meanPlunge !== null && beta && beta.trend !== undefined && beta.trend !== null && beta.plunge !== undefined && beta.plunge !== null) {
+        faMisfit = MathEngine.getAngle(
+            MathEngine.trendPlungeToVector(beta.trend, beta.plunge), 
+            MathEngine.trendPlungeToVector(faMean.meanTrend, faMean.meanPlunge)
+        );
+    }
+    let faCorrelation = MathEngine.getCorrelationGrade(faMisfit);
+
+    let measuredLCorpus = phaseDataInstance.linear || [];
+    let lMean = measuredLCorpus.length > 0 ? MathEngine.calculateFisherStatistics(measuredLCorpus) : null;
+    
+    let lMisfit = null;
+    if (lMean && (beta || faMean)) {
+        let referenceVector = null;
+        if (faMean && faMean.meanTrend !== undefined) {
+            referenceVector = MathEngine.trendPlungeToVector(faMean.meanTrend, faMean.meanPlunge);
+        } else if (beta && beta.trend !== undefined) {
+            referenceVector = MathEngine.trendPlungeToVector(beta.trend, beta.plunge);
+        }
+        
+        if (referenceVector) {
+            lMisfit = MathEngine.getAngle(referenceVector, MathEngine.trendPlungeToVector(lMean.meanTrend, lMean.meanPlunge));
+        }
+    }
+    let lCorrelation = MathEngine.getCorrelationGrade(lMisfit);
+
+    let fabricType = "Insufficient Data";
+    let interpretationText = "Structural dataset contains insufficient planar entries to compute a meaningful spatial distribution.";
+    
+    if (planarCorpus.length >= 2) {
+        if (!beta) {
+            fabricType = "Point Cluster (Non-Cylindrical)";
+            interpretationText = "Planar elements exhibit a tightly clustered, parallel fabric. The lack of dispersion prevents the calculation of a cylindrical girdle or a valid β-axis.";
+        } else {
+            fabricType = "Girdle Distribution";
+            interpretationText = `Planar data displays a systematic geometric girdle distribution. Calculated β-axis trends ${Math.round(beta.trend)}° -> ${Math.round(beta.plunge)}°.`;
+        }
+    }
+
+    let eigenData = MathEngine.solveEigenstructures(MathEngine.buildOrientationTensor(phaseDataInstance.planar));
+    let rmsError = beta ? MathEngine.calculateRMS(phaseDataInstance.planar, beta) : 0;
+    let suitabilityScore = planarCorpus.length >= 6 ? 85 : 60;
+    let bootstrapData = beta ? MathEngine.calculateBetaBootstrap(phaseDataInstance.planar) : null;
+
+    return {
+        phase: `Phase ${phaseDataInstance.phase}`,
+        dataCount: planarCorpus.length,
+        eigen: eigenData,
+        beta: beta,
+        rms: rmsError,
+        reliability: suitabilityScore,
+        bootstrap: bootstrapData,
+        cylindricity: MathEngine.calculateCylindricityFromRMS(rmsError),
+        fisher: planeMean || { k: 0 },
+        faMean: faMean,
+        lMean: lMean,
+        measuredFA: measuredFACorpus.length,
+        measuredL: measuredLCorpus.length,
+        faMisfit: faMisfit,
+        faCorrelation: faCorrelation,
+        lMisfit: lMisfit,
+        lCorrelation: lCorrelation,
+        evidence: [faCorrelation === 'Excellent' || faCorrelation === 'Good' ? 'Field Verified' : 'Tensor Prediction'],
+        diagnostics: {
+            fabricType: fabricType,
+            interpretation: interpretationText
+        }
+    };
+}
+    
+function executeStructuralSynthesisPipeline() {
+    for (let p = 1; p <= 3; p++) {
+        let pData = structuralDB.phases[p];
+        if (pData.planar.length < 3) continue;
+        analysisResults.global[`F${p}`] = analysePlanarGeneration(pData);
+    }
+
+    for (const domain in structuralDB.domains) {
+        analysisResults.domains[domain] = {};
+        let domDB = structuralDB.domains[domain];
+        for (let p = 1; p <= 3; p++) {
+            let pData = domDB.phases[p];
+            if (pData.planar.length < 3) continue;
+            analysisResults.domains[domain][`F${p}`] = analysePlanarGeneration(pData);
+        }
+    }
+}
+
+// ==========================================
+// 4. VISUALIZATION & MAPS GRAPHICS INTERFACE
+// ==========================================
+const VisualizationEngine = {
+    render() {
+        const cv = document.getElementById('stereoCanvas'); if (!cv) return;
+        const ctx = cv.getContext('2d'); ctx.clearRect(0,0,300,300);
+        const cx = 150, cy = 150, r = 110;
+        ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, 2*Math.PI); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx, cy-r); ctx.lineTo(cx, cy+r); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx-r, cy); ctx.lineTo(cx+r, cy); ctx.stroke();
+
+        let allRecords = [];
+        for (let p = 1; p <= 3; p++) {
+            allRecords = allRecords.concat(structuralDB.phases[p].planar);
+            allRecords = allRecords.concat(structuralDB.phases[p].linear);
+            allRecords = allRecords.concat(structuralDB.phases[p].foldAxis);
+        }
+
+        let uniqueRecords = Array.from(new Set(allRecords));
+        uniqueRecords.forEach(p => {
+            let [nx, ny, nz] = p.vector;
+            let f = Math.sqrt(1 / (1 + Math.abs(nz)));
+            let cfg = symbolsConfig[p.structure] || { char: '●', color: '#0f172a' };
+            ctx.fillStyle = cfg.color; ctx.font = "bold 12px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText(cfg.char, cx + r * nx * f, cy + r * ny * f);
+        });
+
+        const mCv = document.getElementById('mapCanvas'); const mCtx = mCv.getContext('2d');
+        mCtx.clearRect(0,0,300,300); mCtx.strokeStyle = '#f1f5f9';
+        for(let g=20; g<300; g+=25) {
+            mCtx.beginPath(); mCtx.moveTo(g, 0); mCtx.lineTo(g, 300); mCtx.stroke();
+            mCtx.beginPath(); mCtx.moveTo(0, g); mCtx.lineTo(300, g); mCtx.stroke();
+        }
+        if (uniqueRecords.length === 0) return;
+        let lats = uniqueRecords.map(p => p.lat), lons = uniqueRecords.map(p => p.lon);
+        let minLa = Math.min(...lats), maxLa = Math.max(...lats), minLo = Math.min(...lons), maxLo = Math.max(...lons);
+        let printed = new Set();
+        uniqueRecords.forEach(p => {
+            let x = 40 + ((p.lon - minLo) / (maxLo - minLo || 1)) * 220, y = 260 - ((p.lat - minLa) / (maxLa - minLa || 1)) * 220;
+            if (printed.has(p.station + p.structure)) return; printed.add(p.station + p.structure);
+            mCtx.fillStyle = (symbolsConfig[p.structure] || { color: '#0f172a' }).color;
+            mCtx.beginPath(); mCtx.arc(x, y, 4, 0, 2*Math.PI); mCtx.fill();
+            mCtx.font = '9px monospace'; mCtx.fillStyle = '#475569'; mCtx.fillText(p.station, x + 6, y + 3);
+        });
+    }
+};
+
+function displayDatasetCounts() {
+    document.getElementById('inv-stations').innerText = runtimeSummary.stations;
+    document.getElementById('inv-total').innerText = runtimeSummary.measurements;
+    document.getElementById('inv-domains').innerText = runtimeSummary.domains.length;
+    document.getElementById('inv-litho').innerText = runtimeSummary.lithologies.length;
+
+    let allPlanes = [];
+    for(let p=1; p<=3; p++) allPlanes = allPlanes.concat(structuralDB.phases[p].planar);
+    let uPlanes = Array.from(new Set(allPlanes));
+
+    document.getElementById('inv-s0').innerText = uPlanes.filter(p => p.structure === 'S0').length;
+    document.getElementById('inv-s1').innerText = uPlanes.filter(p => p.structure === 'S1').length;
+    document.getElementById('inv-s2').innerText = uPlanes.filter(p => p.structure === 'S2').length;
+    document.getElementById('inv-s3').innerText = uPlanes.filter(p => p.structure === 'S3').length;
+
+    let l1=0, l2=0, l3=0, fa1=0, fa2=0, fa3=0;
+    for(let p=1; p<=3; p++) {
+        structuralDB.phases[p].linear.forEach(l => { if(l.structure==='L1')l1++; if(l.structure==='L2')l2++; if(l.structure==='L3')l3++; });
+        structuralDB.phases[p].foldAxis.forEach(f => { if(f.structure==='FA1')fa1++; if(f.structure==='FA2')fa2++; if(f.structure==='FA3')fa3++; });
+    }
+
+    document.getElementById('inv-l1').innerText = l1;
+    document.getElementById('inv-l2').innerText = l2;
+    document.getElementById('inv-l3').innerText = l3;
+    document.getElementById('inv-fa').innerText = (fa1 + fa2 + fa3);
+
+    const s0S = uPlanes.filter(p => p.structure === 'S0');
+    if (s0S.length > 0) {
+        let dips = s0S.map(p => p.dip), avg = dips.reduce((a,b)=>a+b,0)/dips.length;
+        document.getElementById('geoStatisticsContainer').innerHTML = `<table><tr><th>Avg Bedding Dip</th><td>${avg.toFixed(0)}°</td></tr><tr><th>Min/Max Dip</th><td>${Math.min(...dips)}° / ${Math.max(...dips)}°</td></tr></table>`;
+    }
+}
+
+function getFabricInterpretation(fabricClass, stats = {}) {
+    const { 
+        lambda1 = null, 
+        lambda2 = null, 
+        lambda3 = null, 
+        woodcockK = null, 
+        woodcockC = null,
+        rms = null,
+        suitability = null 
+    } = stats;
+
+    let notes = [];
+    if (woodcockK !== null && woodcockK < 0.2) notes.push("Low Woodcock K indicates a strongly girdle-dominated fabric.");
+    if (woodcockK !== null && woodcockK > 5) notes.push("High Woodcock K indicates a strongly clustered orientation fabric.");
+    if (rms !== null && rms < 5) notes.push("Excellent cylindrical fit.");
+    if (rms !== null && rms >= 5 && rms < 12) notes.push("Moderate cylindrical consistency.");
+    if (rms !== null && rms >= 12) notes.push("High residual dispersion suggests non-cylindrical deformation.");
+
+    const additionalNotesStr = notes.length > 0 ? notes.join(" ") : "Fabric parameters track within normal baseline variance limits.";
+
+    switch (fabricClass) {
+        case "Point Cluster":
+            return {
+                title: "Point Cluster",
+                interpretation: "The poles form a concentrated population indicating either a single structural limb or a homogeneous regional foliation.",
+                geologicalMeaning: "The structural fabric represents one dominant orientation rather than a folded surface.",
+                foldAxis: "β-axis computation suppressed.",
+                recommendation: "Collect measurements across both fold limbs or additional structural domains.",
+                additionalNotes: additionalNotesStr
+            };
+        case "Cylindrical Girdle Distribution":
+        case "Girdle Distribution":
+        case "Girdle / Planar Trend":
+            let calculatedIg = (lambda1 && (lambda1 - lambda3 > 1e-5)) ? ((lambda1 - lambda2) / (lambda1 - lambda3)) : 0;
+            return {
+                title: "Cylindrical Girdle Distribution",
+                interpretation: `The poles define a continuous great-circle girdle (Ig: ${calculatedIg.toFixed(3)}), indicating systematic rotation of planar surfaces around a common fold hinge.`,
+                geologicalMeaning: "The dataset contains sufficient rotational dispersion to confidently isolate a stable statistical beta-axis.",
+                foldAxis: "Beta-axis calculated directly from the structural tensor orientation matrix.",
+                recommendation: "Compare the calculated beta-axis with mapped field hinges (FA) and associated linear kinematic fabrics (L).",
+                additionalNotes: additionalNotesStr
+            };
+        default:
+            return {
+                title: "Random/Isotropic Distribution",
+                interpretation: `The poles are widely dispersed without any statistically significant preferred orientation.`,
+                geologicalMeaning: "The dataset probably combines unrelated structural events, or contains random background tracking noise.",
+                foldAxis: "Not calculated.",
+                recommendation: "Partition the master dataset into localized structural sub-domains.",
+                additionalNotes: additionalNotesStr
+            };
+    }
+}   
+
+// ==========================================
+// 5. NARRATIVE GENERATION & REPORT COMPILER
+// ==========================================
+function buildNarrative(model) {
+    let structuralInsight = "";
+    let dynamicsAesthetic = "normal";
+
+    if (model.woodcockK > 2.0) {
+        structuralInsight = `The structural dataset reflects a highly localized axial strain field. This tightly bound spatial orientation typically highlights primary hinge zones or deep-seated tectonic shortening directions.`;
+        dynamicsAesthetic = "accent-critical";
+    } else if (model.woodcockK < 0.4) {
+        structuralInsight = `The calculated tensor profile establishes a cylindrical profile mapping. This suggests regional overprinting or representative cylindrical folding distributions common in polyphase deformation domains.`;
+        dynamicsAesthetic = "accent-girdle";
+    } else {
+        structuralInsight = `The geometric dispersion indicates distributed planar fabric tendencies, pointing toward complex fold-limb geometries or localized structural variations.`;
+    }
+
+    return {
+        title: `${model.phaseName} Synthesis Narrative`,
+        classification: model.classificationTitle,
+        insightText: structuralInsight,
+        strengthSummary: `Fabric structural intensity parameter (Woodcock C) parses at ${model.woodcockC.toFixed(2)}, indicating a data dispersion weight profile matching ${model.sampleCount} recorded stations.`,
+        styleHook: dynamicsAesthetic
+    };
+}
+
+function buildLimitations() {
+    const limitations = [];
+
+    for (const pKey in analysisResults.global) {
+        const r = analysisResults.global[pKey];
+        if (!r) continue;
+
+        if (!r.beta) {
+            limitations.push(`Phase ${r.phase || pKey}: The planar fabric forms a single point-cluster or dispersed population. The available orientations do not define a statistically meaningful β-axis.`);
+            continue;
+        }
+
+        if (r.beta && !r.faMean) {
+            limitations.push(`Phase ${r.phase || pKey}: No measured fold hinge (FA${r.phase || pKey}) was supplied. The calculated β-axis therefore remains an analytical prediction requiring field verification.`);
+        }
+
+        if (r.beta && r.bootstrap && typeof r.bootstrap.ci95 === "number" && r.bootstrap.ci95 > 20) {
+            limitations.push(`Phase ${r.phase || pKey}: Bootstrap confidence interval is broad (95% cone = ${r.bootstrap.ci95.toFixed(1)}°), indicating elevated orientation variability within this deformation phase.`);
+        }
+    }
+
+    const totalStations = runtimeSummary.stations || 0;
+    if (totalStations < 10) {
+        limitations.push(`Only ${totalStations} structural stations were analysed. Additional stations are recommended before extrapolating regional fold geometry.`);
+    }
+
+    const totalDomains = (runtimeSummary.domains || []).length;
+    if (totalDomains <= 1) {
+        limitations.push(`Measurements originate from a single mapped structural domain. Regional extrapolation should therefore be made with caution until adjacent domains are investigated.`);
+    }
+
+    if (limitations.length === 0) {
+        limitations.push("No significant analytical limitations were identified. The imported structural dataset satisfies the current quality criteria for statistical fold analysis.");
+    }
+
+    let limHtml = `<ul style="padding-left:20px; font-size:13px; margin:0 0 10px 0; line-height:1.6;">`;
+    limitations.forEach(item => {
+        limHtml += `<li style="margin-bottom:6px;">${item}</li>`;
+    });
+    limHtml += `</ul>
+    <div class="caution-box" style="background:#fef2f2; border-left:4px solid #dc2626; padding:10px; font-size:12px; color:#7f1d1d; border-radius:5px;">
+    <strong>Interpretation Notice</strong><br>
+    Calculated β-axes represent statistically derived fold-axis estimates based on imported planar orientations. Geological interpretation should always be integrated with field observations, mapped hinge traces, younging criteria, and independent structural evidence before regional tectonic conclusions are drawn.
+    </div>`;
+
+    const limCont = document.getElementById("limitationsContainer") || document.getElementById("analysisNotesContainer") || document.getElementById("analysisNotes");
+    if (limCont) {
+        limCont.innerHTML = limHtml;
+    }
+}
+
+function buildStructuralReportingSuites() {
+    const tC = document.getElementById('tensorContainer'), fC = document.getElementById('foldGeometryContainer');
+    if (tC) tC.innerHTML = ""; 
+    if (fC) fC.innerHTML = "";
+
+    let primaryKey = analysisResults.global.F1 ? "F1" : (analysisResults.global.F2 ? "F2" : null);
+    if (!primaryKey && Object.keys(analysisResults.global).length > 0) primaryKey = Object.keys(analysisResults.global)[0];
+    
+    if (!primaryKey || !analysisResults.global[primaryKey]) {
+        if (document.getElementById('card-trend-plunge')) document.getElementById('card-trend-plunge').innerHTML = `<span style="color:var(--warning)">Insufficient Data</span>`;
+        if (document.getElementById('conf-overall')) document.getElementById('conf-overall').innerText = "0%";
+        return;
+    }
+    let mainReport = analysisResults.global[primaryKey];
+
+    const dataInterpretationModels = [];
+
+    for (const pKey in analysisResults.global) {
+        const r = analysisResults.global[pKey];
+        if (!r || !r.eigen) continue;
+        
+        const eig1 = r.eigen?.values?.[0];
+        let l1 = Math.max(1e-5, eig1 ?? 0);
+        let l2 = Math.max(1e-5, r.eigen?.values?.[1] ?? 0);
+        let l3 = Math.max(1e-5, r.eigen?.values?.[2] ?? 0);
+
+        let woodcockC = Math.log(Math.max(1.0, l1 / l3));
+        let woodcockK_Num = Math.log(Math.max(1.0, l1 / l2));
+        let woodcockK_Den = Math.log(Math.max(1.0, l2 / l3));
+        let woodcockK = (woodcockK_Den > 1e-5) ? (woodcockK_Num / woodcockK_Den) : 0.0;
+        let girdleIndex = (l1 - l3 > 1e-5) ? ((l1 - l2) / (l1 - l3)) : 0.0;
+
+        let phaseIndex = parseInt(pKey.replace('F', ''));
+        let targetPlanes = structuralDB.phases[phaseIndex]?.planar || [];
+        
+        let rLength = 0;
+        if (targetPlanes.length > 0) {
+            let rx = 0, ry = 0, rz = 0;
+            targetPlanes.forEach(p => { rx += p.vector[0]; ry += p.vector[1]; rz += p.vector[2]; });
+            rLength = Math.sqrt(rx*rx + ry*ry + rz*rz);
+        }
+
+        let fabricType = "Random Fabric Distribution";
+        if (woodcockC < 0.4) {
+            fabricType = "Random Fabric Distribution";
+        } else if (woodcockK > 2.0) {
+            fabricType = "Point Cluster";
+        } else if (woodcockK < 0.4) {
+            fabricType = "Cylindrical Girdle Distribution";
+        } else if (woodcockK >= 0.4 && woodcockK <= 2.0) {
+            fabricType = "Girdle / Planar Trend";
+        }
+
+        let geoExplanation = getFabricInterpretation(fabricType, {
+            lambda1: l1, lambda2: l2, lambda3: l3,
+            woodcockK: woodcockK, woodcockC: woodcockC,
+            rms: r.rms, suitability: r.reliability
+        });
+
+        dataInterpretationModels.push({
+            phaseName: r.phase,
+            l1, l2, l3,
+            woodcockK, woodcockC, girdleIndex, rLength,
+            sampleCount: targetPlanes.length,
+            classificationTitle: geoExplanation.title
+        });
+    }
+
+    dataInterpretationModels.forEach(model => {
+        if (tC) {
+            tC.innerHTML += `
+            <div style="font-size:13px; font-weight:700; margin-top:12px; color:#1e293b;">
+                ${model.phaseName} Orientation Tensor Statistics
+            </div>
+            <table style="width:100%; border-collapse:collapse; margin-bottom:8px; font-size:12px;">
+                <tr><th>&lambda;₁ (Dominant Axis)</th><td>${model.l1.toFixed(4)}</td></tr>
+                <tr><th>&lambda;₂ (Intermediate Axis)</th><td>${model.l2.toFixed(4)}</td></tr>
+                <tr><th>&lambda;₃ (Minor Axis)</th><td>${model.l3.toFixed(4)}</td></tr>
+                <tr style="border-top:1px dashed #cbd5e1;"><th>Woodcock K (Shape)</th><td>${model.woodcockK.toFixed(3)}</td></tr>
+                <tr><th>Woodcock C (Strength)</th><td>${model.woodcockC.toFixed(3)}</td></tr>
+                <tr><th>Girdle Index (Ig)</th><td>${model.girdleIndex.toFixed(3)}</td></tr>
+                <tr><th>Resultant Vector Length (R)</th><td>${model.rLength.toFixed(2)} (n=${model.sampleCount})</td></tr>
+                <tr style="background:#f8fafc; font-weight:bold; color:#0f172a;">
+                    <th>Fabric Classification</th>
+                    <td>${model.classificationTitle}</td>
+                </tr>
+            </table>`;
+        }
+    });
+
+    for (const pKey in analysisResults.global) {
+        const r = analysisResults.global[pKey];
+        if (!r) continue;
+        let betaStr = r.beta ? MathEngine.formatTrendPlunge(r.beta) : `<span style="color:#dc2626; font-weight:700;">No Beta (Cluster/Random)</span>`;
+        let bootStr = (r.beta && r.bootstrap && r.bootstrap.ci95 > 0) ? `&plusmn;${r.bootstrap.ci95.toFixed(1)}&deg;` : "N/A";
+        
+        if (fC) {
+            fC.innerHTML += `
+            <div style="font-size:13px; font-weight:700; margin-top:12px; color:#1e293b;">
+                ${r.phase} Fold Axis Analysis
+            </div>
+            <table style="width:100%; border-collapse:collapse; margin-bottom:15px; font-size:12px;">
+                <tr><th>Calculated &beta;-axis</th><td>${betaStr}</td></tr>
+                <tr><th>95% Bootstrap CI</th><td>${bootStr}</td></tr>
+                <tr><th>Cylindricity Profile</th><td>${r.beta ? r.cylindricity + '%' : 'N/A (Non-Girdle)'}</td></tr>
+                <tr><th>Fisher Dispersion (k)</th><td>${r.fisher.k.toFixed(1)}</td></tr>
+            </table>`;
+        }
+    }
+
+    if (mainReport.beta) {
+        document.getElementById('card-trend-plunge').innerHTML = `Trend: ${Math.round(mainReport.beta.trend).toString().padStart(3,'0')}°<br>Plunge: ${Math.round(mainReport.beta.plunge).toString().padStart(2,'0')}°`;
+        document.getElementById('card-cyl-val').innerText = `${mainReport.cylindricity}%`;
+        document.getElementById('card-cyl-profile').innerText = `RMS ${mainReport.rms.toFixed(2)}° Residual`;
+        document.getElementById('card-character').innerText = MathEngine.getPlungeCharacter(mainReport.beta.plunge);
+    } else {
+        document.getElementById('card-trend-plunge').innerHTML = `<span style="color:#dc2626; font-size:13px; font-weight:700;">Fabric Insufficient</span>`;
+        document.getElementById('card-cyl-val').innerText = "N/A";
+        document.getElementById('card-cyl-profile').innerText = "Point Cluster / Noise Detected";
+        document.getElementById('card-character').innerText = "Non-Cylindrical Distribution";
+    }
+    document.getElementById('conf-overall').innerText = `${mainReport.reliability}%`;
+    document.getElementById('conf-stars').innerText = mainReport.reliability >= 75 ? "★★★★★" : "★★★☆☆";
+    document.getElementById('conf-verification').innerText = `Verification markers: ${mainReport.evidence.join(', ')}`;
+
+    let tbl = `<div style="font-size:13px; font-weight:700; margin-top:10px;">Phase Correlation Evaluation Summary Matrix (&beta;<sub>n</sub> &rarr; FA<sub>n</sub> &rarr; L<sub>n</sub>)</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Phase Unit</th>
+                <th>Calculated &beta;-axis</th>
+                <th>Field Hinge (FA)</th>
+                <th>&beta; &rarr; FA Misfit</th>
+                <th>Linear Fabric (L)</th>
+                <th>FA &rarr; L Alignment</th>
+            </tr>
+        </thead>
+        <tbody>`;
+        
+    for (let pKey in analysisResults.global) {
+        let r = analysisResults.global[pKey];
+        let faStr = r.faMean ? MathEngine.formatTrendPlunge(r.faMean) : "Missing";
+        let lStr = r.lMean ? MathEngine.formatTrendPlunge(r.lMean) : "Missing";
+        let faDev = r.faMisfit !== null ? `${r.faMisfit.toFixed(1)}°` : "--";
+        let lDev = r.lMisfit !== null ? `${r.lMisfit.toFixed(1)}°` : "--";
+        
+        tbl += `<tr>
+            <td><strong>${r.phase}</strong></td>
+            <td>${r.beta ? MathEngine.formatTrendPlunge(r.beta) : "N/A"}</td>
+            <td>${faStr} (${r.measuredFA})</td>
+            <td><span class="badge">${faDev} (${r.faCorrelation})</span></td>
+            <td>${lStr} (${r.measuredL})</td>
+            <td><span class="badge">${lDev} (${r.lCorrelation})</span></td>
+        </tr>`;
+    }
+    document.getElementById('correlationContainer').innerHTML = tbl + "</tbody></table>";
+
+    const interpretationContainer = document.getElementById('interpretationContainer');
+    if (interpretationContainer) {
+        let compiledNarrativeHtml = "";
+        dataInterpretationModels.forEach(model => {
+            const prose = buildNarrative(model);
+            const leftBorderColor = prose.styleHook === "accent-critical" ? "#dc3545" : 
+                                    prose.styleHook === "accent-girdle" ? "#0284c7" : "#64748b";
+
+            compiledNarrativeHtml += `
+                <div class="narrative-block" style="border-left: 4px solid ${leftBorderColor}; background: #f8fafc; padding: 16px; margin-bottom: 16px; border-radius: 0 4px 4px 0;">
+                    <h4 style="margin: 0 0 6px 0; font-size: 14px; color: #0f172a;">${prose.title}</h4>
+                    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; font-weight: 600; margin-bottom: 8px;">
+                        Classification: ${prose.classification}
+                    </div>
+                    <p style="font-size: 13px; color: #334155; line-height: 1.5; margin: 0 0 8px 0;">
+                        ${prose.insightText}
+                    </p>
+                    <small style="font-size: 11px; color: #94a3b8; display: block; font-style: italic;">
+                        ${prose.strengthSummary}
+                    </small>
+                </div>`;
+        });
+        interpretationContainer.innerHTML = compiledNarrativeHtml;
+    }
+
+    const totalL1  = (structuralDB.phases[1]?.linear || []).filter(l => l.structure === 'L1').length;
+    const totalL2  = (structuralDB.phases[2]?.linear || []).filter(l => l.structure === 'L2').length;
+    const totalL3  = (structuralDB.phases[3]?.linear || []).filter(l => l.structure === 'L3').length;
+    const totalFA1 = (structuralDB.phases[1]?.foldAxis || []).filter(f => f.structure === 'FA1').length;
+    const totalFA2 = (structuralDB.phases[2]?.foldAxis || []).filter(f => f.structure === 'FA2').length;
+    const totalFA3 = (structuralDB.phases[3]?.foldAxis || []).filter(f => f.structure === 'FA3').length;
+    const totalDomains = runtimeSummary.domains.length;
+
+    const structuralRuleset = [
+        { id: "R21", priority: 1, category: "Lineation", title: "Missing L1 Measurements", evaluate: () => totalL1 === 0, recommendation: "Measure L1 stretching lineations on S1 foliation surfaces to constrain transport direction and compare directly with the calculated β(S0,S1) fold axis." },
+        { id: "R22", priority: 1, category: "Lineation", title: "Missing L2 Measurements", evaluate: () => totalL2 === 0 && totalFA2 > 0, recommendation: "Collect L2 mineral or intersection lineations associated with F2 deformation to independently verify second-generation shortening directions." },
+        { id: "R23", priority: 1, category: "Lineation", title: "Missing L3 Measurements", evaluate: () => totalL3 === 0 && totalFA3 > 0, recommendation: "Acquire L3 lineation measurements where late-stage deformation fabrics are preserved to strengthen higher-order kinematic interpretations." },
+        { id: "R24", priority: 1, category: "Fold Axis", title: "Missing FA1", evaluate: () => totalFA1 === 0, recommendation: "Map F1 fold hinge traces (FA1) to independently validate the calculated β(S0,S1) statistical fold axis." },
+        { id: "R25", priority: 1, category: "Fold Axis", title: "Missing FA2", evaluate: () => totalFA2 === 0 && totalL2 > 0, recommendation: "Measure F2 hinge orientations (FA2) to verify the β(S1,S2) fold axis and evaluate progressive deformation." },
+        { id: "R26", priority: 1, category: "Fold Axis", title: "Missing FA3", evaluate: () => totalFA3 === 0 && totalL3 > 0, recommendation: "Record F3 fold hinges (FA3) wherever observable to validate late-stage deformation geometries." },
+        { id: "R27", priority: 2, category: "Structural Domains", title: "Limited Domain Coverage", evaluate: () => totalDomains <= 1, recommendation: "Extend structural mapping into additional domains to determine whether fold geometry remains regionally consistent or changes across lithological boundaries." },
+        { id: "R28", priority: 2, category: "Younging Indicators", title: "Facing Direction Unknown", evaluate: () => true, recommendation: "Record sedimentary younging indicators where preserved to distinguish upright from overturned fold limbs and improve vergence interpretation." },
+        { id: "R29", priority: 2, category: "Fold Geometry", title: "Hinge Zone Density", evaluate: () => true, recommendation: "Increase structural station density within inferred hinge zones to improve β-axis precision and cylindricity assessment." }
+    ];
+
+    let finalRecs = structuralRuleset.filter(rule => rule.evaluate()).sort((a,b)=>a.priority-b.priority);
+    if(finalRecs.length===0){
+        finalRecs.push({ id:"PASS", priority:999, category:"Quality Control", title:"Dataset Complete", recommendation: "No significant acquisition gaps were identified. The imported structural dataset satisfies the minimum analytical requirements for tensor analysis, β-axis determination, deformation-phase correlation, and structural interpretation." });
+    }
+
+    const chkBoxContainer = document.getElementById('checklistContainer');
+    if (chkBoxContainer) {
+        chkBoxContainer.innerHTML = "";
+        finalRecs.forEach(m => { 
+            chkBoxContainer.innerHTML += `<div class="checklist-item" style="display:flex; gap:8px; margin-bottom:6px;"><input type="checkbox"><div><strong>${m.title}:</strong> ${m.recommendation}</div></div>`; 
+        });
+    }
+
+    buildLimitations();
+}
+
+// Wrap reporting engine invocation with clear UI containers reset and global exception handling
+try {
+    const containerIds = ["interpretationContainer", "checklistContainer", "limitationsContainer"];
+    containerIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = "";
+    });
+} catch (err) {
+    console.error("Structural Reporting Engine Critical Error:", err);
+}
+
+// ==========================================
+// 6. PIPELINE WORKSPACE RUNTIME EXECUTION
+// ==========================================
+function executeSuite() {
+    const pRes = InputLayer.parseCSV(document.getElementById('csvInput').value);
+    const logD = document.getElementById('qcLogs'); logD.innerHTML = "";
+    pRes.logs.forEach(l => { logD.innerHTML += `<div class="qc-item qc-${l.type ==='pass'?'pass':'warn'}">${l.msg}</div>`; });
+    
+    executeStructuralSynthesisPipeline();
+    displayDatasetCounts();
+    VisualizationEngine.render();
+    buildStructuralReportingSuites();
+    
+    document.getElementById('polyphaseWarningContainer').innerHTML = `<div class="qc-item qc-pass"><strong>Phasor Engine Live:</strong> Data evaluated across explicit generational vectors. Mapped Domains: [${runtimeSummary.domains.join(", ")}].</div>`;
+}
+
+function exportDataToCSV() {
+    const csvContent = document.getElementById('csvInput').value;
+    if (!csvContent.trim()) { alert("No data available to export."); return; }
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute("download", "Extracted_Structural_Data.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+function toggleTextArea() { const c = document.getElementById('textareaContainer'); c.style.display = (c.style.display === 'block') ? 'none' : 'block'; }
+function toggleAdvancedSettings() { const e = document.getElementById('advancedContent'); e.style.display = (e.style.display === 'block') ? 'none' : 'block'; }
+function downloadTemplate() {
+    const blob = new Blob(["Station,Latitude,Longitude,Structure,Strike,Dip,Generation,Domain,Lithology,Younging\nST01,30.11,78.24,S0,225,45,1,A,Quartzite,"], {type: "text/csv"});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = "Structural_Field_Template.csv"; a.click();
+}
+function openAllSectionsAndPrint() { document.querySelectorAll('details.report-section').forEach(s => s.setAttribute('open', 'true')); setTimeout(() => { window.print(); }, 250); }
+
+const dz = document.getElementById('dropZone'), fi = document.getElementById('fileInput');
+if (dz && fi) {
+    dz.addEventListener('dragover', (e) => e.preventDefault());
+    dz.addEventListener('drop', (e) => { e.preventDefault(); if(e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]); });
+    fi.addEventListener('change', (e) => { if(e.target.files.length > 0) handleFile(e.target.files[0]); });
+}
+function handleFile(file) {
+    const r = new FileReader(); r.onload = (e) => { document.getElementById('csvInput').value = e.target.result; executeSuite(); }; r.readAsText(file);
+}
+window.onload = () => { executeSuite(); };
+</script>
+</body>
+</html>
