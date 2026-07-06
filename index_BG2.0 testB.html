@@ -967,7 +967,7 @@ function getFabricInterpretation(fabricClass, stats = {}) {
                 additionalNotes: additionalNotesStr
             };
 
-        case "Pure Girdle":
+        case "Cylindrical Girdle Distribution":
         case "Girdle Distribution":
         case "Girdle / Planar Trend":
             let calculatedIg = (lambda1 && (lambda1 - lambda3 > 1e-5)) ? ((lambda1 - lambda2) / (lambda1 - lambda3)) : 0;
@@ -991,7 +991,7 @@ function getFabricInterpretation(fabricClass, stats = {}) {
             };
 
         case "Random Distribution":
-        case "Random Spread":
+        case "Random Fabric Distribution":
             return {
                 title: "Random/Isotropic Distribution",
                 interpretation: `The poles are widely dispersed without any statistically significant preferred orientation ($C$: ${woodcockC?.toFixed(2)}). No coherent structural fabric is recognized within the imported measurements.`,
@@ -1001,9 +1001,9 @@ function getFabricInterpretation(fabricClass, stats = {}) {
                 additionalNotes: additionalNotesStr
             };
 
-        case "Partial Girdle":
+        case "Weak Girdle Distribution":
             return {
-                title: "Partial Girdle",
+                title: "Weak Girdle Distribution",
                 interpretation: "The poles exhibit moderate rotational dispersion but do not form a complete great-circle distribution. This commonly reflects incomplete exposure of fold limbs or limited target sampling fields.",
                 geologicalMeaning: "Fold geometry may be present but remains incompletely constrained by the current mapping array.",
                 foldAxis: "$\\beta$-axis calculated with moderate structural confidence bounds.",
@@ -1053,21 +1053,19 @@ function buildStructuralReportingSuites() {
     for (let pKey in analysisResults.global) {
         let r = analysisResults.global[pKey];
         
-// Extract structural eigenvalues
+        // Extract structural eigenvalues
         let l1 = Math.max(1e-5, r.eigen.values[0]);
         let l2 = Math.max(1e-5, r.eigen.values[1]);
         let l3 = Math.max(1e-5, r.eigen.values[2]); // Protect against division by zero & negative logs
 
         // Calculate Woodcock (1977) parameters explicitly for the publication table view
-        // Ensure natural log arguments are >= 1 to maintain positive physical space
         let woodcockC = Math.log(Math.max(1.0, l1 / l3));
         
         let woodcockK_Num = Math.log(Math.max(1.0, l1 / l2));
         let woodcockK_Den = Math.log(Math.max(1.0, l2 / l3));
-        // Avoid 0 / 0 or division by microscopic noise; default to 0 (or 1 depending on preferred isometric state)
         let woodcockK = (woodcockK_Den > 1e-5) ? (woodcockK_Num / woodcockK_Den) : 0.0;
         
-        // Girdle index variation (normalized relative concentration between intermediate axes)
+        // Girdle index variation
         let girdleDen = l1 - l3;
         let girdleIndex = (girdleDen > 1e-5) ? ((l1 - l2) / girdleDen) : 0.0;
 
@@ -1082,23 +1080,19 @@ function buildStructuralReportingSuites() {
             rLength = Math.sqrt(rx*rx + ry*ry + rz*rz);
         }
 
-// =========================================================================
-        // ADVANCED FABRIC MATRIX & STRUCTURAL INTERPRETATION BUILDER
-        // =========================================================================
-        
         // 1. Refined Multi-Tier Fabric Classification Logic
-        let fabricType = "Random Spread";
+        let fabricType = "Random Fabric Distribution";
         if (woodcockC < 0.4) {
-            fabricType = "Random Spread";
+            fabricType = "Random Fabric Distribution";
         } else if (woodcockK > 2.0) {
             fabricType = "Point Cluster";
         } else if (woodcockK < 0.4) {
-            fabricType = "Pure Girdle";
+            fabricType = "Cylindrical Girdle Distribution";
         } else if (woodcockK >= 0.4 && woodcockK <= 2.0) {
             fabricType = "Girdle / Planar Trend";
         }
 
-       // 2. Fetch the "Why" Interpretation Payload with updated runtime flags passed down
+        // 2. Fetch the Interpretation Payload
         let geoExplanation = getFabricInterpretation(fabricType, {
             lambda1: l1,
             lambda2: l2,
@@ -1109,46 +1103,45 @@ function buildStructuralReportingSuites() {
             suitability: r.reliability
         });
         
-       // 3. Render Publication-Quality Tensor Shape Table with Embedded Dynamic Explanations
+        // 3. Render Publication-Quality Tensor Shape Table
         tC.innerHTML += `
         <div style="font-size:13px; font-weight:700; margin-top:12px; color:#1e293b;">
-            ${r.phase} Fabrication Shape Matrix
+            ${r.phase} Orientation Tensor Statistics
         </div>
         <table style="width:100%; border-collapse:collapse; margin-bottom:8px; font-size:12px;">
-            <tr><th>$\\lambda_1$ (Dominant Axis)</th><td>${l1.toFixed(4)}</td></tr>
-            <tr><th>$\\lambda_2$ (Intermediate Axis)</th><td>${l2.toFixed(4)}</td></tr>
-            <tr><th>$\\lambda_3$ (Minor Axis)</th><td>${l3.toFixed(4)}</td></tr>
+            <tr><th>&lambda;₁ (Dominant Axis)</th><td>${l1.toFixed(4)}</td></tr>
+            <tr><th>&lambda;₂ (Intermediate Axis)</th><td>${l2.toFixed(4)}</td></tr>
+            <tr><th>&lambda;₃ (Minor Axis)</th><td>${l3.toFixed(4)}</td></tr>
             <tr style="border-top:1px dashed #cbd5e1;"><th>Woodcock K (Shape)</th><td>${woodcockK.toFixed(3)}</td></tr>
             <tr><th>Woodcock C (Strength)</th><td>${woodcockC.toFixed(3)}</td></tr>
-            <tr><th>Girdle Index ($I_g$)</th><td>${girdleIndex.toFixed(3)}</td></tr>
-            <tr><th>Resultant Vector Length ($R$)</th><td>${rLength.toFixed(2)} ($n=${targetPlanes.length}$)</td></tr>
+            <tr><th>Girdle Index (Ig)</th><td>${girdleIndex.toFixed(3)}</td></tr>
+            <tr><th>Resultant Vector Length (R)</th><td>${rLength.toFixed(2)} (n=${targetPlanes.length})</td></tr>
             <tr style="background:#f8fafc; font-weight:bold; color:#0f172a;">
                 <th>Fabric Classification</th>
                 <td>${geoExplanation.title}</td>
             </tr>
         </table>
         
-        <!-- Publication Explanatory Box: Explaining WHY the data looks like this -->
         <div style="background:#f1f5f9; border-left:3px solid #0284c7; padding:10px; font-size:11px; color:#334155; margin-bottom:20px; line-height:1.4;">
             <strong>Structural Analysis:</strong> ${geoExplanation.interpretation}<br>
             <span style="display:block; margin-top:4px;"><strong>Geological Significance:</strong> ${geoExplanation.geologicalMeaning}</span>
-            <span style="display:block; margin-top:2px;"><strong>Calculated Confidence Flags:</strong> <span style="color:#b91c1c; font-weight:600;">${geoExplanation.additionalNotes}</span></span>
-            <span style="display:block; margin-top:4px; color:#0369a1;"><strong>Target Action:</strong> ${geoExplanation.recommendation}</span>
+            <span style="display:block; margin-top:2px;"><strong>Analytical Remarks:</strong> <span style="color:#b91c1c; font-weight:600;">${geoExplanation.additionalNotes}</span></span>
+            <span style="display:block; margin-top:4px; color:#0369a1;"><strong>Recommended Field Action:</strong> ${geoExplanation.recommendation}</span>
         </div>`;
         
-        // 2. Render Corresponding Kinematic Beta Calculation Table
+        // 4. Render Corresponding Kinematic Beta Calculation Table
         let betaStr = r.beta ? MathEngine.formatTrendPlunge(r.beta) : `<span style="color:#dc2626; font-weight:700;">No Beta (Cluster/Random)</span>`;
-        let bootStr = (r.beta && r.bootstrap && r.bootstrap.ci95 > 0) ? `±${r.bootstrap.ci95.toFixed(1)}°` : "N/A";
+        let bootStr = (r.beta && r.bootstrap && r.bootstrap.ci95 > 0) ? `&plusmn;${r.bootstrap.ci95.toFixed(1)}&deg;` : "N/A";
         
         fC.innerHTML += `
         <div style="font-size:13px; font-weight:700; margin-top:12px; color:#1e293b;">
-            ${r.phase} Kinematic Axis Suite
+            ${r.phase} Fold Axis Analysis
         </div>
         <table style="width:100%; border-collapse:collapse; margin-bottom:15px; font-size:12px;">
-            <tr><th>Calculated $\\beta$-axis</th><td>${betaStr}</td></tr>
+            <tr><th>Calculated &beta;-axis</th><td>${betaStr}</td></tr>
             <tr><th>95% Bootstrap CI</th><td>${bootStr}</td></tr>
             <tr><th>Cylindricity Profile</th><td>${r.beta ? r.cylindricity + '%' : 'N/A (Non-Girdle)'}</td></tr>
-            <tr><th>Fisher Dispersion ($k$)</th><td>${r.fisher.k.toFixed(1)}</td></tr>
+            <tr><th>Fisher Dispersion (k)</th><td>${r.fisher.k.toFixed(1)}</td></tr>
         </table>`;
     }
 
@@ -1165,22 +1158,22 @@ function buildStructuralReportingSuites() {
         document.getElementById('card-character').innerText = "Non-Cylindrical Distribution";
     }
 
-    // General Quality Metrics (Always active regardless of beta presence)
+    // General Quality Metrics
     document.getElementById('conf-overall').innerText = `${mainReport.reliability}%`;
     document.getElementById('conf-stars').innerText = mainReport.reliability >= 75 ? "★★★★★" : "★★★☆☆";
     document.getElementById('conf-verification').innerText = `Verification markers: ${mainReport.evidence.join(', ')}`;
 
     // Render Summary Correlation Table Matrix
-    let tbl = `<div style="font-size:13px; font-weight:700; margin-top:10px;">Phase Correlation Evaluation Summary Matrix ($\\beta_n \\rightarrow \\text{FA}_n \\rightarrow \\text{L}_n$)</div>
+    let tbl = `<div style="font-size:13px; font-weight:700; margin-top:10px;">Phase Correlation Evaluation Summary Matrix (&beta;<sub>n</sub> &rarr; FA<sub>n</sub> &rarr; L<sub>n</sub>)</div>
     <table>
         <thead>
             <tr>
                 <th>Phase Unit</th>
-                <th>Calculated $\\beta$-axis</th>
+                <th>Calculated &beta;-axis</th>
                 <th>Field Hinge (FA)</th>
-                <th>$\\beta \\rightarrow \\text{FA}$ Misfit</th>
+                <th>&beta; &rarr; FA Misfit</th>
                 <th>Linear Fabric (L)</th>
-                <th>$\\text{FA} \\rightarrow \\text{L}$ Alignment</th>
+                <th>FA &rarr; L Alignment</th>
             </tr>
         </thead>
         <tbody>`;
@@ -1208,17 +1201,11 @@ function buildStructuralReportingSuites() {
     for (let pKey in analysisResults.global) {
         let r = analysisResults.global[pKey];
         
-        let p1_Summary = `<strong>Dataset Summary (${r.phase}):</strong> Structural synthesis processing evaluated ${r.dataCount} planar features mapped across ${runtimeSummary.stations} active field stations within a lithological framework dominated by ${runtimeSummary.lithologies.join(', ')}. Data controls establish a localized spatial profile with an overall calculated confidence profile marking at ${r.reliability}%.`;
+        let p1_Summary = `<strong>Dataset Summary (${r.phase}):</strong> Structural synthesis processing evaluated ${r.dataCount || 0} features mapped across ${runtimeSummary.stations || 0} active field stations within a lithological framework. Data controls establish a localized spatial profile with an overall calculated confidence profile marking at ${r.reliability || 0}%.`;
 
         let faStr = r.faMean ? MathEngine.formatTrendPlunge(r.faMean) : "absent";
         let lStr = r.lMean ? MathEngine.formatTrendPlunge(r.lMean) : "absent";
-        let p2_Fabric = `<strong>Fabric Analysis:</strong> Planar orientation distributions exhibit a cylindricity profile tracking at ${r.beta ? r.cylindricity + '%' : 'N/A'} with a mean geometric dispersion tensor eigenvalue of ${r.eigen.values[0].toFixed(2)}. Field inventory records matching mesoscopic indicators note measured hinge targets (${r.measuredFA}) averaging ${faStr}, alongside co-eval linear kinematic lineations (${r.measuredL}) yielding a spatial mean of ${lStr}.`;
-
-        // Restore missing narrative summaries to prevent ReferenceErrors
-        let p1_Summary = `<strong>Dataset Summary (${r.phase}):</strong> Structural synthesis processing evaluated ${r.dataCount || 0} features mapped across ${runtimeSummary.stations || 0} active field stations.`;
-        let faStr = r.faMean ? MathEngine.formatTrendPlunge(r.faMean) : "absent";
-        let lStr = r.lMean ? MathEngine.formatTrendPlunge(r.lMean) : "absent";
-        let p2_Fabric = `<strong>Fabric Analysis:</strong> Planar orientation distributions exhibit a cylindricity profile tracking at ${r.beta ? r.cylindricity + '%' : 'N/A'}. Mesoscopic indicators note measured hinge targets averaging ${faStr}, alongside lineations yielding a spatial mean of ${lStr}.`;
+        let p2_Fabric = `<strong>Fabric Analysis:</strong> Planar orientation distributions exhibit a cylindricity profile tracking at ${r.beta ? r.cylindricity + '%' : 'N/A'} with a mean geometric dispersion tensor eigenvalue of ${l1.toFixed(2)}. Field inventory records matching mesoscopic indicators note measured hinge targets (${r.measuredFA}) averaging ${faStr}, alongside co-eval linear kinematic lineations (${r.measuredL}) yielding a spatial mean of ${lStr}.`;
 
         let bStr = r.beta ? MathEngine.formatTrendPlunge(r.beta) : "N/A";
         let characterStr = (r.beta && r.beta.plunge !== undefined) ? MathEngine.getPlungeCharacter(r.beta.plunge) : 'Non-cylindrical system';
@@ -1228,7 +1215,6 @@ function buildStructuralReportingSuites() {
         
         let bootStr = (r.beta && r.bootstrap && r.bootstrap.ci95 > 0) ? `Resampling bootstrap constraints present a 95% confidence envelope radius of ±${r.bootstrap.ci95.toFixed(1)}°.` : "Bootstrap resampling window requires supplementary verification arrays.";
         
-        // Guard r.rms calculation cleanly against undefined states
         let safeRms = (r.rms !== undefined && r.rms !== null) ? r.rms.toFixed(2) : "0.00";
         let p4_Limitations = `<strong>Limitations & Quality Controls:</strong> Vector stability scales directly with localized structural variance tracking an RMS residual error of ${safeRms}°: ${bootStr} Any cross-domain extrapolations assume mechanical and spatial homogeneity inside explicit sub-sectors; lack of physical verification controls across sparse sectors may shift spatial boundaries.`;
 
@@ -1248,31 +1234,40 @@ function buildStructuralReportingSuites() {
     // Recommendations Checklists & Map Controls Tracker
     const recommendations = [];
     let totalL = 0, totalFA = 0;
-    for(let p=1; p<=3; p++) { totalL += structuralDB.phases[p].linear.length; totalFA += structuralDB.phases[p].foldAxis.length; }
+    for(let p=1; p<=3; p++) { 
+        if(structuralDB.phases[p]) {
+            totalL += (structuralDB.phases[p].linear || []).length; 
+            totalFA += (structuralDB.phases[p].foldAxis || []).length; 
+        }
+    }
 
     if (totalL === 0) recommendations.push("<strong>Fieldwork Missing:</strong> Measure mineral stretching lineations across active profiles to tie kinematic slip coordinates.");
     if (totalFA === 0) recommendations.push("<strong>Validation Gap:</strong> Direct map physical outcrop micro-fold hinge orientations to confirm tensor beta modeling.");
-    if (runtimeSummary.domains.length === 1) recommendations.push("<strong>Homogeneous Spatial Profile:</strong> Extend structural collection loops into adjacent domains to establish regional mapping consistency.");
+    if (runtimeSummary.domains && runtimeSummary.domains.length === 1) recommendations.push("<strong>Homogeneous Spatial Profile:</strong> Extend structural collection loops into adjacent domains to establish regional mapping consistency.");
     
     const chkBoxContainer = document.getElementById('checklistContainer');
-    chkBoxContainer.innerHTML = "";
-    if (recommendations.length === 0) recommendations.push("Baseline target data saturated. Spatial configuration complete.");
-    recommendations.forEach(m => { chkBoxContainer.innerHTML += `<div class="checklist-item"><input type="checkbox"><div>${m}</div></div>`; });
+    if (chkBoxContainer) {
+        chkBoxContainer.innerHTML = "";
+        if (recommendations.length === 0) recommendations.push("Baseline target data saturated. Spatial configuration complete.");
+        recommendations.forEach(m => { chkBoxContainer.innerHTML += `<div class="checklist-item"><input type="checkbox"><div>${m}</div></div>`; });
+    }
 
     // Output Field Limitations Summary Notes
     const limitations = [];
     for (let pKey in analysisResults.global) {
         let r = analysisResults.global[pKey];
-        if (!r.beta) limitations.push(`Layer ${r.phase} point cluster/scatter configuration prevents unique fold axis ($\\beta$-axis) extraction.`);
-        if (r.faMean === null) limitations.push(`The calculated spatial $\\beta$-axis projection for phase ${r.phase} has not been confirmed via physical outcrop structural logs.`);
-        if (r.beta && r.bootstrap.ci95 > 20) limitations.push(`Deformation phase layer ${r.phase} displays high orientation variance. Bootstrap angular calculation limits are wide.`);
+        if (!r.beta) limitations.push(`Layer ${r.phase} point cluster/scatter configuration prevents unique fold axis extraction.`);
+        if (r.faMean === null) limitations.push(`The calculated spatial beta-axis projection for phase ${r.phase} has not been confirmed via physical outcrop structural logs.`);
+        if (r.beta && r.bootstrap && r.bootstrap.ci95 > 20) limitations.push(`Deformation phase layer ${r.phase} displays high orientation variance. Bootstrap angular calculation limits are wide.`);
     }
     if (runtimeSummary.stations < 10) limitations.push(`Spatial tracking profile density remains localized (Count: ${runtimeSummary.stations} active stations).`);
 
     let limHtml = `<ul style="padding-left:20px; font-size:13px;">`;
     limitations.forEach(l => limHtml += `<li>${l}</li>`);
     limHtml += `</ul><div class="caution-box"><strong>Domain Modeling Notice:</strong> Multi-domain calculations assume homogeneous planar characteristics inside explicit mapped sub-sectors.</div>`;
-    document.getElementById('limitationsContainer').innerHTML = limHtml;
+    
+    let limCont = document.getElementById('limitationsContainer');
+    if (limCont) limCont.innerHTML = limHtml;
 }
     
 // ==========================================
