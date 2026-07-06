@@ -742,7 +742,7 @@ function analysePlanarGeneration(phaseDataInstance) {
     let faMean = measuredFACorpus.length > 0 ? MathEngine.calculateFisherStatistics(measuredFACorpus) : null;
     
     let faMisfit = null;
-    if (faMean && beta && beta.trend !== undefined && beta.plunge !== undefined) {
+    if (faMean && faMean.meanTrend !== undefined && faMean.meanTrend !== null && faMean.meanPlunge !== undefined && faMean.meanPlunge !== null && beta && beta.trend !== undefined && beta.trend !== null && beta.plunge !== undefined && beta.plunge !== null) {
         faMisfit = MathEngine.getAngle(
             MathEngine.trendPlungeToVector(beta.trend, beta.plunge), 
             MathEngine.trendPlungeToVector(faMean.meanTrend, faMean.meanPlunge)
@@ -784,17 +784,31 @@ function analysePlanarGeneration(phaseDataInstance) {
     }
 
     // 5. Package and return the payload to the DOM renderer safely
+    // 5. Package and return the payload to the DOM renderer safely
+    let eigenData = MathEngine.solveEigenstructures(MathEngine.buildOrientationTensor(phaseDataInstance.planar));
+    let rmsError = beta ? MathEngine.calculateRMS(phaseDataInstance.planar, beta) : 0;
+    let suitabilityScore = planarCorpus.length >= 6 ? 85 : 60;
+    let bootstrapData = beta ? MathEngine.calculateBetaBootstrap(phaseDataInstance.planar) : null;
+
     return {
-        planarSummary: planeMean,
-        calculatedBeta: beta,
-        measuredFASummary: faMean,
-        measuredLSummary: lMean,
-        misfitAnalysis: {
-            foldAxisMisfit: faMisfit,
-            foldAxisGrade: faCorrelation,
-            lineationMisfit: lMisfit,
-            lineationGrade: lCorrelation
-        },
+        phase: `Phase ${phaseDataInstance.phase}`,
+        dataCount: planarCorpus.length,
+        eigen: eigenData,
+        beta: beta,
+        rms: rmsError,
+        reliability: suitabilityScore,
+        bootstrap: bootstrapData,
+        cylindricity: MathEngine.calculateCylindricityFromRMS(rmsError),
+        fisher: planeMean || { k: 0 },
+        faMean: faMean,
+        lMean: lMean,
+        measuredFA: measuredFACorpus.length,
+        measuredL: measuredLCorpus.length,
+        faMisfit: faMisfit,
+        faCorrelation: faCorrelation,
+        lMisfit: lMisfit,
+        lCorrelation: lCorrelation,
+        evidence: [faCorrelation === 'Excellent' || faCorrelation === 'Good' ? 'Field Verified' : 'Tensor Prediction'],
         diagnostics: {
             fabricType: fabricType,
             interpretation: interpretationText
@@ -807,7 +821,7 @@ function executeStructuralSynthesisPipeline() {
     for (let p = 1; p <= 3; p++) {
         let pData = structuralDB.phases[p];
         if (pData.planar.length < 3) continue;
-        analysisResults.global[`F${p}`] = analysePlanarGeneration(p, pData);
+        analysisResults.global[`F${p}`] = analysePlanarGeneration(pData);
     }
 
     for (const domain in structuralDB.domains) {
@@ -816,7 +830,7 @@ function executeStructuralSynthesisPipeline() {
         for (let p = 1; p <= 3; p++) {
             let pData = domDB.phases[p];
             if (pData.planar.length < 3) continue;
-            analysisResults.domains[domain][`F${p}`] = analysePlanarGeneration(p, pData);
+            analysisResults.domains[domain][`F${p}`] = analysePlanarGeneration(pData);
         }
     }
 }
@@ -1057,6 +1071,7 @@ function buildStructuralReportingSuites() {
 
     for (let pKey in analysisResults.global) {
         let r = analysisResults.global[pKey];
+        if (!r || !r.eigen) continue;
         
         // Extract structural eigenvalues
         let l1 = Math.max(1e-5, r.eigen.values[0]);
