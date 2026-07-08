@@ -1,0 +1,17 @@
+// src/constants.js
+// Centralized thresholds and presets for Structural-Analysis (frozen for v1.0.0)
+export const SOFTWARE_VERSION = '1.0.0';
+
+export const THRESHOLDS = {
+  MIN_TENSOR: 3,
+  MIN_FABRIC_PRELIM: 3,
+  MIN_BETA: 5,
+  MIN_BOOTSTRAP: 1000,
+  BOOTSTRAP_PRESETS: { QUICK: 1000, STANDARD: 5000, RESEARCH: 10000 },
+  MIN_TENSOR_STABILITY: 35,
+  MAX_RMS_DEG: 12,
+  MAX_BOOTSTRAP_CI_DEG: 15,
+  CYLINDRICITY: { POINT: 0.25, WEAK_GIRDLE: 0.45, GIRDLE: 0.70 },
+  MULTIMODAL: { SEPARATION_DEG: 35, SECONDARY_PCT: 0.15 },
+  CONFIDENCE_CAP: 95
+};
