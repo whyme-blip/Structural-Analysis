@@ -1,0 +1,39 @@
+{
+  "metadata": {
+    "generatedAt": "2026-07-08T00:00:00.000Z",
+    "parserVersion": "2.0",
+    "softwareVersion": "1.0.0",
+    "sampleCount": 5
+  },
+  "inventory": {
+    "stations": ["TS1","TS1B","TS1C","TS1D","TS1H"],
+    "domains": ["Central_Block"],
+    "lithologies": ["Mica Schist","Quartzite"],
+    "generations": [1]
+  },
+  "phases": {
+    "F1": {
+      "metadata": { "phase": "F1", "parserVersion": "2.0", "softwareVersion": "1.0.0", "generatedAt": "2026-07-08T00:00:00.000Z", "sampleCount": 4 },
+      "planarRecords": [],
+      "linearRecords": [],
+      "foldAxes": [],
+      "stations": [],
+      "domains": {
+        "Central_Block": {
+          "metadata": { "phase": "F1", "domain": "Central_Block", "parserVersion": "2.0" },
+          "planarRecords": [],
+          "linearRecords": [],
+          "foldAxes": [],
+          "stations": [],
+          "derived": { "betaAxis": null, "fisherMeanPole": null, "meanFoldAxis": null, "meanLineation": null, "girdlePole": null },
+          "results": { "tensor": null, "eigen": null, "woodcock": null, "fisher": null, "bootstrap": null, "beta": null, "evidence": null, "confidence": null, "interpretation": null, "recommendations": [], "limitations": [], "qc": { "warnings": [], "errors": [], "passed": false } }
+        }
+      },
+      "derived": { "betaAxis": null, "fisherMeanPole": null, "meanFoldAxis": null, "meanLineation": null, "girdlePole": null },
+      "results": { "tensor": null, "eigen": null, "woodcock": null, "fisher": null, "bootstrap": null, "beta": null, "evidence": null, "confidence": null, "interpretation": null, "recommendations": [], "limitations": [], "qc": { "warnings": [], "errors": [], "passed": false } }
+    },
+    "F2": { "metadata": { "phase": "F2" }, "planarRecords": [], "linearRecords": [], "foldAxes": [], "stations": [], "domains": {}, "derived": {}, "results": {} },
+    "F3": { "metadata": { "phase": "F3" }, "planarRecords": [], "linearRecords": [], "foldAxes": [], "stations": [], "domains": {}, "derived": {}, "results": {} }
+  },
+  "global": { "regionalTensor": null, "regionalBeta": null, "regionalInterpretation": null, "regionalRecommendations": null, "regionalLimitations": null }
+}
