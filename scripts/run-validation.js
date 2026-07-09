@@ -14,14 +14,10 @@ import { computeConfidence } from '../src/analysis/confidenceEngine/confidenceEn
 import { THRESHOLDS, SOFTWARE_DEFAULT_SEED, SOFTWARE_VERSION, DEFAULT_PHASE_NAMES, CONFIDENCE_MAX_WITHHELD } from '../src/constants.js';
 import { createSeededRNG } from '../src/utils/rng.js';
 import { DATASETS } from '../tests/fixtures/index.js';
+import { getFinalConfidenceFromPhase } from '../src/utils/confidenceAccessor.js';
 
 function usage() {
-  console.log(`Usage: node scripts/run-validation.js [--preset quick|standard|research] [--dataset name] [--verbose]
-
-Examples:
-  node scripts/run-validation.js
-  node scripts/run-validation.js --preset standard --dataset StrongGirdle --verbose
-`);
+  console.log(`Usage: node scripts/run-validation.js [--preset quick|standard|research] [--dataset name] [--verbose]\n\nExamples:\n  node scripts/run-validation.js\n  node scripts/run-validation.js --preset standard --dataset StrongGirdle --verbose\n`);
 }
 
 function buildCSV(records) {
@@ -45,17 +41,20 @@ function uniq(a){ return Array.from(new Set(a)); }
 
 function ensureDir(dir){ if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); }
 
-// helper to robustly read final confidence score (handles legacy and new shapes)
-function finalConfidenceScoreFromPhase(phase){
-  if (!phase || !phase.results) return null;
-  const conf = phase.results.confidence;
-  if (!conf) return null;
-  // new canonical shape: conf is object with score
-  if (typeof conf.score === 'number') return conf.score;
-  // older shape: conf may be wrapper { data: { score: ... } }
-  if (conf.data && typeof conf.data.score === 'number') return conf.data.score;
-  // last resort: check nested places
-  return null;
+// helper: axial angular difference between two trend/plunge or vector objects
+import { angularDistance, trendPlungeToVector } from '../src/core/geometry.js';
+function axialAngleBetween(a,b){
+  if (!a || !b) return null;
+  const toVec = v => {
+    if (Array.isArray(v)) return v;
+    if (v && typeof v === 'object' && 'x' in v) return [v.x, v.y, v.z];
+    if (v && typeof v === 'object' && 'trend' in v && 'plunge' in v) return trendPlungeToVector(v.trend, v.plunge);
+    return null;
+  };
+  const va = toVec(a); const vb = toVec(b);
+  if (!va || !vb) return null;
+  const raw = angularDistance(va, vb);
+  return Math.min(raw, 180 - raw);
 }
 
 async function runOne(name, records, options){
@@ -107,22 +106,6 @@ async function runOne(name, records, options){
   return pipeline;
 }
 
-// helper: axial angular difference between two trend/plunge or vector objects
-import { angularDistance, trendPlungeToVector } from '../src/core/geometry.js';
-function axialAngleBetween(a,b){
-  if (!a || !b) return null;
-  const toVec = v => {
-    if (Array.isArray(v)) return v;
-    if (v && typeof v === 'object' && 'x' in v) return [v.x, v.y, v.z];
-    if (v && typeof v === 'object' && 'trend' in v && 'plunge' in v) return trendPlungeToVector(v.trend, v.plunge);
-    return null;
-  };
-  const va = toVec(a); const vb = toVec(b);
-  if (!va || !vb) return null;
-  const raw = angularDistance(va, vb);
-  return Math.min(raw, 180 - raw);
-}
-
 async function main(){
   const argv = process.argv.slice(2);
   const opts = { preset: 'quick', verbose: false, dataset: null };
@@ -162,7 +145,7 @@ async function main(){
     const confidenceObj = phase.results && phase.results.confidence ? phase.results.confidence : null;
 
     // robust final confidence (ensure we use the post-cap score)
-    const confScore = finalConfidenceScoreFromPhase(phase);
+    const confScore = getFinalConfidenceFromPhase(phase);
     const confRating = confidenceObj ? confidenceObj.rating : null;
     const confCapped = confidenceObj ? !!confidenceObj.confidenceCapped : false;
     const confCapReason = confidenceObj ? confidenceObj.capReason : null;
