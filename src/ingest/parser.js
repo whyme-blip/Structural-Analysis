@@ -1,34 +1,39 @@
-export function parseCSV(content) {
-    const defaultRecords = [
-        { station: 'ST-01', structure: 'foliation', strike: '145', dip: '30', generation: 'F1', domain: 'Global', lithology: 'Schist', vector: [1.0, 0.0, 0.0] },
-        { station: 'ST-02', structure: 'foliation', strike: '148', dip: '28', generation: 'F1', domain: 'Global', lithology: 'Schist', vector: [1.0, 0.0, 0.0] }
-    ];
-    if (!content || typeof content !== 'string') return defaultRecords;
-    const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
-    if (lines.length <= 1) return defaultRecords;
-    
-    const header = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, ''));
-    const data = [];
-    
-    for (let i = 1; i < lines.length; i++) {
-        const cols = lines[i].split(',').map(c => c.trim().replace(/^["']|["']$/g, ''));
-        const obj = {};
-        header.forEach((h, idx) => {
-            obj[h] = cols[idx] || '';
-        });
-        obj.vector = [1.0, 0.0, 0.0];
-        data.push(obj);
+// src/ingest/parser.js
+// Small CSV parser used by the runner. Accepts CSV string and returns { success, data }
+// The runner expects parsed.planarRecords: array of objects with fields:
+// { station, structure, strike, dip, generation, domain, lithology, vector? }
+
+export function parseCSV(csvText = '') {
+  if (!csvText || typeof csvText !== 'string') return { success: false, error: 'no_input' };
+
+  const lines = csvText.split(/\r?\n/).filter(Boolean);
+  if (lines.length === 0) return { success: false, error: 'empty' };
+
+  // header detection
+  const rawHeader = lines[0].split(',').map(h => h.trim().toLowerCase());
+  const header = rawHeader.map(h => h.replace(/[^a-z0-9_]/g, ''));
+
+  const records = [];
+  for (let i = 1; i < lines.length; i++) {
+    const row = lines[i].split(',').map(s => s.trim());
+    const obj = {};
+    for (let j = 0; j < header.length; j++) {
+      const key = header[j] || `col${j}`;
+      obj[key] = row[j] !== undefined ? row[j] : '';
     }
-    return data.length > 0 ? data : defaultRecords;
+    // normalize fields expected by pipeline
+    const normalized = {
+      station: obj.station || obj.stn || obj.col0 || '',
+      structure: obj.structure || obj.feature || '',
+      strike: obj.strike || obj.trend || null,
+      dip: obj.dip || obj.plunge || null,
+      generation: obj.generation || '',
+      domain: obj.domain || '',
+      lithology: obj.lithology || ''
+    };
+    records.push(normalized);
+  }
+
+  // The pipeline expects planarRecords in phase.planarRecords; parser returns them directly
+  return { success: true, data: { planarRecords: records } };
 }
-
-export function parse(data) {
-    return data || {};
-}
-
-const defaultExport = {
-    parseCSV,
-    parse
-};
-
-export default defaultExport;
