@@ -1,6 +1,3 @@
-/**
- * Complete deterministic random number generator utility with dataset tracking state.
- */
 let currentSeed = 1337;
 let currentDatasetName = 'StrongGirdle';
 
@@ -38,10 +35,12 @@ export function getCurrentDataset() {
     return currentDatasetName;
 }
 
-export default {
+const defaultExport = {
     seed,
     random,
     next,
     createSeededRNG,
     getCurrentDataset
 };
+
+export default defaultExport;
