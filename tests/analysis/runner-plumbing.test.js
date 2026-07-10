@@ -1,41 +1,26 @@
-const assert = require('assert');
-const path = require('path');
+// tests/analysis/runner-plumbing.test.js
+import { getFinalConfidenceFromPhase } from '../../src/utils/confidenceAccessor.js';
 
-// Dynamically resolve path to the confidence accessor utility
-const accessorPath = path.resolve(__dirname, '../../src/utils/confidenceAccessor.js');
+function assert(cond,msg){ if(!cond) throw new Error(msg); }
 
-try {
-    const getConfidenceScore = require(accessorPath);
+(function run(){
+  // Case A: canonical shape
+  const phaseA = { results: { confidence: { score: 60, confidenceCapped: true, capReason: 'BETA_WITHHELD' } } };
+  const vA = getFinalConfidenceFromPhase(phaseA);
+  console.log('plumbing A', vA);
+  assert(vA === 60, 'Expected final confidence 60 for canonical shape');
 
-    console.log('▶ Running Runner Plumbing Tests...');
+  // Case B: legacy wrapper shape
+  const phaseB = { results: { confidence: { data: { score: 55 }, confidenceCapped: false } } };
+  const vB = getFinalConfidenceFromPhase(phaseB);
+  console.log('plumbing B', vB);
+  assert(vB === 55, 'Expected final confidence 55 for legacy wrapper');
 
-    // Test Case 1: Canonical Flat Shape
-    const canonicalPayload = { score: 0.85, status: 'stable' };
-    assert.strictEqual(
-        getConfidenceScore(canonicalPayload), 
-        0.85, 
-        'Failed to extract score from canonical flat object structure.'
-    );
+  // Case C: missing/confidence null
+  const phaseC = { results: { confidence: null } };
+  const vC = getFinalConfidenceFromPhase(phaseC);
+  console.log('plumbing C', vC);
+  assert(vC === null, 'Expected null for missing confidence');
 
-    // Test Case 2: Legacy Wrapped Shape
-    const legacyPayload = { data: { score: 0.72 }, status: 'legacy' };
-    assert.strictEqual(
-        getConfidenceScore(legacyPayload), 
-        0.72, 
-        'Failed to extract score from legacy data wrapper structure.'
-    );
-
-    // Test Case 3: Edge Case / Missing Score Fallback
-    const malformedPayload = { status: 'corrupted' };
-    assert.strictEqual(
-        getConfidenceScore(malformedPayload), 
-        0.60, 
-        'Failed to fallback to clamped 0.60 score when payload is malformed.'
-    );
-
-    console.log('✅ All runner plumbing tests passed successfully!\n');
-} catch (error) {
-    console.error('❌ Runner plumbing test execution failed:');
-    console.error(error.stack);
-    process.exit(1);
-}
+  console.log('runner-plumbing.test.js passed');
+})();
