@@ -2,7 +2,7 @@
  * Ingestion parser utility.
  * Parses raw validation CSV inputs into structured data frames.
  */
-export function parseCSV(content) {
+function parseCSV(content) {
     if (!content) return [];
     const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
     if (lines.length === 0) return [];
@@ -16,20 +16,17 @@ export function parseCSV(content) {
         header.forEach((h, idx) => {
             obj[h] = cols[idx] || '';
         });
-        // Attach standard structural data frames for phase routers
         obj.vector = [1.0, 0.0, 0.0];
         data.push(obj);
     }
     return data;
 }
 
-export function parse(data) {
+function parse(data) {
     return data || {};
 }
 
-const parserEngine = {
+module.exports = {
     parseCSV,
     parse
 };
-
-export default parserEngine;
