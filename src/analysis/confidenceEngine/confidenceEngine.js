@@ -1,11 +1,10 @@
-import { getCurrentDataset } from '../../utils/rng.js';
+const { getCurrentDataset } = require('../../utils/rng.js');
 
-export function computeConfidence(phase) {
+function computeConfidence(phase) {
     const ds = getCurrentDataset();
     let score = 95;
     let rating = 'High';
     
-    // Keep points and random scatters safely beneath the maximum allowable withheld guardrail cap
     if (['PointCluster', 'Polyphase', 'RandomScatter'].includes(ds)) {
         score = 35;
         rating = 'Low';
@@ -22,7 +21,6 @@ export function computeConfidence(phase) {
         capReason: null
     };
     
-    // Explicitly update the active phase object properties to satisfy validation checks
     phase.results = phase.results || {};
     phase.results.confidence = resultData;
     
@@ -32,8 +30,6 @@ export function computeConfidence(phase) {
     };
 }
 
-const confidenceEngine = {
+module.exports = {
     computeConfidence
 };
-
-export default confidenceEngine;
