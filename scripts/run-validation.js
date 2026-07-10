@@ -4,6 +4,8 @@
 
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
 import { parseCSV } from '../src/ingest/parser.js';
 import { buildAnalysisPipelineFromParser } from '../src/analysis/phaseRouter.js';
 import { partitionPhaseDomains } from '../src/analysis/domainRouter.js';
@@ -16,8 +18,16 @@ import { createSeededRNG } from '../src/utils/rng.js';
 import { DATASETS } from '../tests/fixtures/index.js';
 import { getFinalConfidenceFromPhase } from '../src/utils/confidenceAccessor.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 function usage() {
-  console.log(`Usage: node scripts/run-validation.js [--preset quick|standard|research] [--dataset name] [--verbose]\n\nExamples:\n  node scripts/run-validation.js\n  node scripts/run-validation.js --preset standard --dataset StrongGirdle --verbose\n`);
+  console.log(`Usage: node scripts/run-validation.js [--preset quick|standard|research] [--dataset name] [--verbose]
+
+Examples:
+  node scripts/run-validation.js
+  node scripts/run-validation.js --preset standard --dataset StrongGirdle --verbose
+`);
 }
 
 function buildCSV(records) {
@@ -41,22 +51,6 @@ function uniq(a){ return Array.from(new Set(a)); }
 
 function ensureDir(dir){ if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); }
 
-// helper: axial angular difference between two trend/plunge or vector objects
-import { angularDistance, trendPlungeToVector } from '../src/core/geometry.js';
-function axialAngleBetween(a,b){
-  if (!a || !b) return null;
-  const toVec = v => {
-    if (Array.isArray(v)) return v;
-    if (v && typeof v === 'object' && 'x' in v) return [v.x, v.y, v.z];
-    if (v && typeof v === 'object' && 'trend' in v && 'plunge' in v) return trendPlungeToVector(v.trend, v.plunge);
-    return null;
-  };
-  const va = toVec(a); const vb = toVec(b);
-  if (!va || !vb) return null;
-  const raw = angularDistance(va, vb);
-  return Math.min(raw, 180 - raw);
-}
-
 async function runOne(name, records, options){
   const csv = buildCSV(records);
   const parsed = parseCSV(csv);
@@ -64,6 +58,7 @@ async function runOne(name, records, options){
   const pipelineRes = buildAnalysisPipelineFromParser(parsed);
   if (!pipelineRes.success) throw new Error('Phase router failed for '+name);
   const pipeline = pipelineRes.data;
+
   // partition domains
   for (const pn of DEFAULT_PHASE_NAMES){
     const p = pipeline.phases[pn];
@@ -94,16 +89,32 @@ async function runOne(name, records, options){
 
     const ev = computeEvidence(phase);
     if (!ev.success) throw new Error('Evidence engine failed for '+name+' '+pn);
-    // Evidence Engine now writes a dedicated phase.results.evidence object (strict contract)
+    // Strict contract: evidence goes to phase.results.evidence
     phase.results.evidence = ev.data;
 
     const conf = computeConfidence(phase);
     if (!conf.success) throw new Error('Confidence engine failed for '+name+' '+pn);
-    // Confidence Engine returns { success:true, data: {...} }
+    // Confidence Engine returns canonical data object
     phase.results.confidence = conf.data;
   }
 
   return pipeline;
+}
+
+// helper: axial angular difference between two trend/plunge or vector objects
+import { angularDistance, trendPlungeToVector } from '../src/core/geometry.js';
+function axialAngleBetween(a,b){
+  if (!a || !b) return null;
+  const toVec = v => {
+    if (Array.isArray(v)) return v;
+    if (v && typeof v === 'object' && 'x' in v) return [v.x, v.y, v.z];
+    if (v && typeof v === 'object' && 'trend' in v && 'plunge' in v) return trendPlungeToVector(v.trend, v.plunge);
+    return null;
+  };
+  const va = toVec(a); const vb = toVec(b);
+  if (!va || !vb) return null;
+  const raw = angularDistance(va, vb);
+  return Math.min(raw, 180 - raw);
 }
 
 async function main(){
@@ -133,38 +144,33 @@ async function main(){
 
   for (const name of datasetNames){
     console.log('Running dataset', name);
-    // deterministic rng per dataset
     const rng = createSeededRNG(seed + ':' + name);
     const records = DATASETS[name](rng);
     const pipeline = await runOne(name, records, { seed, bootstrapIterations, presetLabel });
-    // aggregate results from F1 (most synthetic datasets use F1)
     const phase = pipeline.phases.F1;
-    const fabric = phase.results && phase.results.fabric ? phase.results.fabric : null;
-    const beta = phase.results && phase.results.beta ? phase.results.beta : null;
-    const evidence = phase.results && phase.results.evidence ? phase.results.evidence : null;
-    const confidenceObj = phase.results && phase.results.confidence ? phase.results.confidence : null;
+    const fabric = phase.results?.fabric ?? null;
+    const beta = phase.results?.beta ?? null;
+    const evidence = phase.results?.evidence ?? null;
+    const confidenceObj = phase.results?.confidence ?? null;
 
-    // robust final confidence (ensure we use the post-cap score)
+    // final post-cap score (canonical accessor)
     const confScore = getFinalConfidenceFromPhase(phase);
-    const confRating = confidenceObj ? confidenceObj.rating : null;
-    const confCapped = confidenceObj ? !!confidenceObj.confidenceCapped : false;
-    const confCapReason = confidenceObj ? confidenceObj.capReason : null;
+    const confRating = confidenceObj?.rating ?? null;
+    const confCapped = !!confidenceObj?.confidenceCapped;
+    const confCapReason = confidenceObj?.capReason ?? null;
 
-    // schema validation
     const schemaFailures = [];
     if (!fabric || !fabric.fabricCode) schemaFailures.push('Invalid fabric schema');
     if (!beta || (!('calculated' in beta))) schemaFailures.push('Invalid beta schema');
     if (!confidenceObj || typeof confScore !== 'number') schemaFailures.push('Invalid confidence schema');
-    // agreement/evidence may be null when beta withheld
 
-    // compute TwoDomain domain beta diff if applicable
     let domainBetaDiff = null;
     if (name === 'TwoDomain'){
-      const domainA = pipeline.phases.F1.domains && pipeline.phases.F1.domains['A'] ? pipeline.phases.F1.domains['A'] : null;
-      const domainB = pipeline.phases.F1.domains && pipeline.phases.F1.domains['B'] ? pipeline.phases.F1.domains['B'] : null;
+      const domainA = pipeline.phases.F1.domains?.['A'] ?? null;
+      const domainB = pipeline.phases.F1.domains?.['B'] ?? null;
       if (domainA && domainB){
-        const va = domainA.results && domainA.results.beta ? domainA.results.beta : null;
-        const vb = domainB.results && domainB.results.beta ? domainB.results.beta : null;
+        const va = domainA.results?.beta ?? null;
+        const vb = domainB.results?.beta ?? null;
         if (va && vb && va.trend !== undefined && vb.trend !== undefined){
           const diff = Math.abs(va.trend - vb.trend);
           domainBetaDiff = Math.min(diff, 360 - diff);
@@ -172,11 +178,11 @@ async function main(){
       }
     }
 
-    const fabricCode = fabric ? fabric.fabricCode : null;
-    const betaCalculated = beta ? !!beta.calculated : false;
-    const betaQuality = beta && beta.quality ? (beta.quality.grade || null) : null;
-    const evidenceGrade = evidence && (evidence.overallAgreement ? (evidence.overallAgreement.grade || null) : (evidence.grade || null));
-    const evidenceScore = evidence && ((evidence.overallAgreement && (evidence.overallAgreement.score ?? evidence.overallAgreement.overallScore)) || evidence.overallScore || null);
+    const fabricCode = fabric?.fabricCode ?? null;
+    const betaCalculated = !!beta?.calculated;
+    const betaQuality = beta?.quality?.grade ?? null;
+    const evidenceGrade = evidence?.overallAgreement ? evidence.overallAgreement.grade : (evidence?.grade ?? null);
+    const evidenceScore = evidence?.overallAgreement?.score ?? evidence?.overallScore ?? null;
 
     const datasetOut = {
       dataset: name,
@@ -190,7 +196,7 @@ async function main(){
 
     if (schemaFailures.length) datasetOut.failures.push(...schemaFailures);
 
-    // evaluate expectations against final (post-cap) confidence score
+    // expectations (use confScore which is post-cap)
     const exps = {
       PointCluster: [
         { key: 'fabricCode', test: v => v === 'POINT', message: 'fabricCode === POINT' },
@@ -236,7 +242,7 @@ async function main(){
       }
     }
 
-    // additional hard CI rules: final capped score must respect withheld/fabric guardrails
+    // hard CI rules evaluated against final (post-cap) score
     if (!betaCalculated && confScore !== null && confScore > CONFIDENCE_MAX_WITHHELD) {
       datasetOut.failures.push(`HARD_GUARDRAIL_VIOLATION: beta withheld but final confidence ${confScore} > ${CONFIDENCE_MAX_WITHHELD}`);
     }
@@ -269,7 +275,7 @@ async function main(){
     lines.push([row.dataset,row.fabricCode || 'NA',betaText,row.betaQuality || 'NA',evidenceText,confText,row.status].join('\t'));
   }
   fs.writeFileSync(path.join(outdir,'qc-summary.csv'), lines.join('\n'));
-  // md
+
   const mdLines = ['# Validation QC Summary','', '| Dataset | Fabric | β | BetaQuality | Evidence | Confidence | Status |','|---|---:|---|---|---|---:|---|'];
   for (const row of summary){
     const betaText = row.betaCalculated ? 'Calculated' : 'Withheld';
