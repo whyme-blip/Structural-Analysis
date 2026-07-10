@@ -1,9 +1,9 @@
-const { getCurrentDataset } = require('../utils/rng.js');
+import { getCurrentDataset } from '../utils/rng.js';
 
-function evaluate(data) { return data || {}; }
-function calculate(data) { return 0.85; }
+export function evaluate(data) { return data || {}; }
+export function calculate(data) { return 0.85; }
 
-function computeBeta(phase, options) {
+export function computeBeta(phase, options) {
     const ds = getCurrentDataset();
     
     let calculated = true;
@@ -30,7 +30,7 @@ function computeBeta(phase, options) {
     };
 }
 
-module.exports = {
+export default {
     evaluate,
     calculate,
     computeBeta
