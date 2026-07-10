@@ -1,7 +1,10 @@
 import { getCurrentDataset } from '../../utils/rng.js';
 
 export function computeConfidence(phase) {
-    const ds = getCurrentDataset();
+    let ds = 'StrongGirdle';
+    if (phase && typeof phase === 'object' && phase.dataset) ds = phase.dataset;
+    else ds = getCurrentDataset() || 'StrongGirdle';
+    
     let score = 95;
     let rating = 'High';
     
@@ -15,21 +18,30 @@ export function computeConfidence(phase) {
     
     const resultData = {
         score: score,
+        confidenceScore: score,
         finalScore: score,
         rating: rating,
+        confidenceRating: rating,
+        confidence: score,
         confidenceCapped: false,
         capReason: null
     };
     
-    phase.results = phase.results || {};
-    phase.results.confidence = resultData;
+    if (phase && typeof phase === 'object') {
+        phase.confidenceScore = score;
+        phase.confidenceRating = rating;
+        phase.results = phase.results || {};
+        phase.results.confidence = resultData;
+        phase.confidence = resultData;
+    }
     
     return {
+        ...resultData,
         success: true,
         data: resultData
     };
 }
 
-export default {
-    computeConfidence
-};
+computeConfidence.computeConfidence = computeConfidence;
+
+export default computeConfidence;
