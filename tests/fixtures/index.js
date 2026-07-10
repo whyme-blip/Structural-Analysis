@@ -1,9 +1,8 @@
-// index.js (project root)
-// Lightweight entry that exposes the main analysis functions for quick imports.
-// This file intentionally minimal — prefer importing specific modules to keep bundle small.
+// tests/fixtures/index.js (top of file)
 
-export { computeBeta } from './src/analysis/betaEngine.js';
-export { computeConfidence } from './src/analysis/confidenceEngine/confidenceEngine.js';
-export { analyzeFabric } from './src/analysis/fabricClassifier.js';
-export { createSeededRNG } from './src/utils/rng.js';
-export { parseCSV } from './src/ingest/parser.js';
+import { computeBeta } from '../../src/analysis/betaEngine.js';
+import { analyzeFabric } from '../../src/analysis/fabricClassifier.js';
+import { createSeededRNG } from '../../src/utils/rng.js';
+import { parse } from '../../src/ingest/parser.js';
+import { computeConfidence } from '../../src/analysis/confidenceEngine/confidenceEngine.js';
+// ... other imports using ../../src/...
