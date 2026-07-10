@@ -4,20 +4,20 @@
 let currentSeed = 1337;
 let currentDatasetName = 'StrongGirdle';
 
-export function seed(val) {
+function seed(val) {
     currentSeed = Number(val) || 1337;
 }
 
-export function random() {
+function random() {
     currentSeed = (currentSeed * 1664525 + 1013904223) % 4294967296;
     return currentSeed / 4294967296;
 }
 
-export function next() {
+function next() {
     return random();
 }
 
-export function createSeededRNG(initialSeed = 1337) {
+function createSeededRNG(initialSeed = 1337) {
     const seedStr = String(initialSeed);
     if (seedStr.includes(':')) {
         currentDatasetName = seedStr.split(':')[1];
@@ -34,16 +34,14 @@ export function createSeededRNG(initialSeed = 1337) {
     };
 }
 
-export function getCurrentDataset() {
+function getCurrentDataset() {
     return currentDatasetName;
 }
 
-const rng = {
+module.exports = {
     seed,
     random,
     next,
     createSeededRNG,
     getCurrentDataset
 };
-
-export default rng;
