@@ -8,11 +8,15 @@ export const datasets = [
     { id: "ds_03_legacy", fabricCode: "FA-03", results: { confidence: { data: { score: 0.72 } } }, status: "active" }
 ];
 
+// --- Added Uppercase Export for run-validation.js ---
+export const DATASETS = datasets;
+
 export function getFixtures() { return datasets; }
 export function loadFixtures() { return datasets; }
 
 const fixturesBundle = Object.assign([...datasets], {
     datasets,
+    DATASETS,
     getFixtures,
     loadFixtures
 });
