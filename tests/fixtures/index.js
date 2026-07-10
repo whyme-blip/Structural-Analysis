@@ -1,26 +1,9 @@
-const createMockRecords = () => [
-    { station: 'ST-01', structure: 'foliation', strike: '145', dip: '30', generation: 'F1', domain: 'Global', lithology: 'Schist' },
-    { station: 'ST-02', structure: 'foliation', strike: '148', dip: '28', generation: 'F1', domain: 'Global', lithology: 'Schist' }
-];
+// index.js (project root)
+// Lightweight entry that exposes the main analysis functions for quick imports.
+// This file intentionally minimal — prefer importing specific modules to keep bundle small.
 
-export const DATASETS = {
-    PointCluster: () => createMockRecords(),
-    WeakGirdle: () => createMockRecords(),
-    StrongGirdle: () => createMockRecords(),
-    Polyphase: () => createMockRecords(),
-    RandomScatter: () => createMockRecords(),
-    TwoDomain: () => createMockRecords()
-};
-
-export const datasets = DATASETS;
-export function getFixtures() { return DATASETS; }
-export function loadFixtures() { return DATASETS; }
-
-const defaultExport = {
-    DATASETS,
-    datasets,
-    getFixtures,
-    loadFixtures
-};
-
-export default defaultExport;
+export { computeBeta } from './src/analysis/betaEngine.js';
+export { computeConfidence } from './src/analysis/confidenceEngine/confidenceEngine.js';
+export { analyzeFabric } from './src/analysis/fabricClassifier.js';
+export { createSeededRNG } from './src/utils/rng.js';
+export { parseCSV } from './src/ingest/parser.js';
