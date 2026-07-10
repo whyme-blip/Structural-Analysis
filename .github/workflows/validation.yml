@@ -2,7 +2,9 @@ name: Validation Suite
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "sprint-3-analysis" ]
+  pull_request:
+    branches: [ "main", "sprint-3-analysis" ]
   workflow_dispatch:
 
 jobs:
@@ -17,11 +19,18 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Run Runner Plumbing Tests
+        run: node tests/analysis/runner-plumbing.test.js
+
+      - name: Run Guardrail Unit Tests
+        run: node tests/analysis/guardrail.test.js
+
       - name: Run Validation Script
-        run: node scripts/run-validation.js
+        run: node scripts/run-validation.js --preset quick
 
       - name: Upload Validation Artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: validation-output
-          path: qc-summary.csv
+          path: demo/output/
