@@ -1,6 +1,6 @@
-const { getCurrentDataset } = require('../utils/rng.js');
+import { getCurrentDataset } from '../utils/rng.js';
 
-class Tensor {
+export class Tensor {
     constructor(data = []) {
         this.data = data;
         this.shape = [data.length || 0];
@@ -8,14 +8,14 @@ class Tensor {
     matrix() { return this.data; }
 }
 
-function zeros(shape) { return new Tensor(); }
-function ones(shape) { return new Tensor(); }
-function compute(data) { return { score: 1.0, data }; }
-function buildOrientationTensor(data) { return new Tensor(data); }
-function cylindricityIndex(tensor) { return 0.5; }
-function tensorStabilityMetric(tensor) { return 0.95; }
+export function zeros(shape) { return new Tensor(); }
+export function ones(shape) { return new Tensor(); }
+export function compute(data) { return { score: 1.0, data }; }
+export function buildOrientationTensor(data) { return new Tensor(data); }
+export function cylindricityIndex(tensor) { return 0.5; }
+export function tensorStabilityMetric(tensor) { return 0.95; }
 
-function analyzeFabric(vectors, options) {
+export function analyzeFabric(vectors, options) {
     const ds = getCurrentDataset();
     let code = 'GIRDLE';
     
@@ -35,7 +35,7 @@ function analyzeFabric(vectors, options) {
     };
 }
 
-module.exports = {
+export default {
     Tensor,
     zeros,
     ones,
