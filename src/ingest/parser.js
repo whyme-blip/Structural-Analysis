@@ -2,7 +2,7 @@
  * Ingestion parser utility.
  * Parses raw validation CSV inputs into structured data frames.
  */
-function parseCSV(content) {
+export function parseCSV(content) {
     if (!content) return [];
     const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
     if (lines.length === 0) return [];
@@ -22,11 +22,11 @@ function parseCSV(content) {
     return data;
 }
 
-function parse(data) {
+export function parse(data) {
     return data || {};
 }
 
-module.exports = {
+export default {
     parseCSV,
     parse
 };
