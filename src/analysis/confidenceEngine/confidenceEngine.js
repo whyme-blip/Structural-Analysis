@@ -1,6 +1,6 @@
-const { getCurrentDataset } = require('../../utils/rng.js');
+import { getCurrentDataset } from '../../utils/rng.js';
 
-function computeConfidence(phase) {
+export function computeConfidence(phase) {
     const ds = getCurrentDataset();
     let score = 95;
     let rating = 'High';
@@ -30,6 +30,6 @@ function computeConfidence(phase) {
     };
 }
 
-module.exports = {
+export default {
     computeConfidence
 };
